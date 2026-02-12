@@ -118,6 +118,38 @@ function findVisibleSectionIndex(
   return visible;
 }
 
+/** 从 href 提取完整 fragment 并解码 */
+function extractFragment(href: string): string | undefined {
+  const idx = href.indexOf("#");
+  if (idx < 0) return undefined;
+  const raw = href.slice(idx + 1);
+  if (!raw) return undefined;
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
+/** 在 Shadow DOM 中查找锚点元素并滚动到该位置 */
+function scrollToAnchorInSection(
+  shadows: Map<number, ShadowRoot>,
+  sectionIndex: number,
+  fragment: string
+): boolean {
+  const shadow = shadows.get(sectionIndex);
+  if (!shadow || !fragment) return false;
+  const escaped = CSS.escape(fragment);
+  const el =
+    shadow.querySelector(`#${escaped}`) ??
+    shadow.querySelector(`[name="${escaped}"]`);
+  if (el) {
+    (el as HTMLElement).scrollIntoView({ behavior: "smooth", block: "start" });
+    return true;
+  }
+  return false;
+}
+
 /* ---------- 组件 ---------- */
 
 export const EpubScrollView = forwardRef<
@@ -167,6 +199,10 @@ export const EpubScrollView = forwardRef<
         }
 
         if (sectionIndex != null) {
+          const fragment = typeof target === "string" ? extractFragment(target) : undefined;
+          if (fragment && scrollToAnchorInSection(shadowRoots.current, sectionIndex, fragment)) {
+            return;
+          }
           const el = sectionEls.current.get(sectionIndex);
           el?.scrollIntoView({ behavior: "smooth", block: "start" });
         }
@@ -454,21 +490,40 @@ export const EpubScrollView = forwardRef<
       ) as HTMLAnchorElement | undefined;
       if (!anchor) return;
 
-      const href = anchor.getAttribute("href");
-      if (!href) return;
+      const rawHref = anchor.getAttribute("href");
+      if (!rawHref) return;
 
       // 外部链接：不拦截
-      if (href.startsWith("http://") || href.startsWith("https://")) return;
+      if (rawHref.startsWith("http://") || rawHref.startsWith("https://")) return;
 
       e.preventDefault();
       e.stopPropagation();
 
-      // 内部链接：解析并滚动
       const book = bookRef.current;
       if (!book?.resolveHref) return;
+
+      // 通过 composedPath 找到来源 section，用 section.resolveHref 解析相对路径
+      let href = rawHref;
+      const hostDiv = composedPath.find(
+        (el) => el instanceof HTMLElement && (el as HTMLElement).dataset.sectionIndex != null
+      ) as HTMLElement | undefined;
+      if (hostDiv) {
+        const si = Number(hostDiv.dataset.sectionIndex);
+        const section = book.sections[si];
+        if (section?.resolveHref) {
+          href = section.resolveHref(rawHref);
+        }
+      }
+
+      // 内部链接：解析并滚动
       const resolved = book.resolveHref(href);
       if (!resolved) return;
 
+      // 尝试锚点精确定位
+      const fragment = extractFragment(rawHref);
+      if (fragment && scrollToAnchorInSection(shadowRoots.current, resolved.index, fragment)) {
+        return;
+      }
       const el = sectionEls.current.get(resolved.index);
       el?.scrollIntoView({ behavior: "smooth", block: "start" });
     };

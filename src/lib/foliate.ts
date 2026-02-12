@@ -46,6 +46,8 @@ export interface EpubSection {
   unload: () => void;
   /** 返回原始 DOM（资源未解析，不含 blob URL） */
   createDocument: () => Promise<Document>;
+  /** 将相对 href 解析为 EPUB 内部绝对路径 */
+  resolveHref?: (href: string) => string;
   size: number;
   cfi?: string;
   linear?: string;
