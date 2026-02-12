@@ -1,0 +1,82 @@
+import { create } from "zustand";
+import { subscribeWithSelector } from "zustand/middleware";
+import { loadPersistedSettings, persistSettings } from "@/lib/tauri-store";
+
+export type Theme = "light" | "dark" | "sepia";
+
+interface SettingsState {
+  theme: Theme;
+  fontFamily: string;
+  fontSize: number;
+  lineHeight: number;
+  margin: number;
+  _hydrated: boolean;
+}
+
+interface SettingsActions {
+  setTheme: (theme: Theme) => void;
+  setFontFamily: (fontFamily: string) => void;
+  setFontSize: (fontSize: number) => void;
+  setLineHeight: (lineHeight: number) => void;
+  setMargin: (margin: number) => void;
+  hydrate: () => Promise<void>;
+}
+
+const DEFAULTS: Omit<SettingsState, "_hydrated"> = {
+  theme: "light",
+  fontFamily: "system-ui",
+  fontSize: 18,
+  lineHeight: 1.8,
+  margin: 60,
+};
+
+export const useSettingsStore = create<SettingsState & SettingsActions>()(
+  subscribeWithSelector((set) => ({
+    ...DEFAULTS,
+    _hydrated: false,
+
+    setTheme: (theme) => set({ theme }),
+    setFontFamily: (fontFamily) => set({ fontFamily }),
+    setFontSize: (fontSize) => set({ fontSize }),
+    setLineHeight: (lineHeight) => set({ lineHeight }),
+    setMargin: (margin) => set({ margin }),
+
+    hydrate: async () => {
+      const persisted = await loadPersistedSettings(DEFAULTS);
+      set({ ...persisted, _hydrated: true });
+    },
+  }))
+);
+
+function applyTheme(theme: Theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+}
+
+// 主题变更时同步到 DOM
+useSettingsStore.subscribe(
+  (s) => s.theme,
+  (theme) => applyTheme(theme)
+);
+
+// 设置变更时自动持久化（排除内部字段）
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+useSettingsStore.subscribe(
+  (s) => ({
+    theme: s.theme,
+    fontFamily: s.fontFamily,
+    fontSize: s.fontSize,
+    lineHeight: s.lineHeight,
+    margin: s.margin,
+  }),
+  (settings) => {
+    if (!useSettingsStore.getState()._hydrated) return;
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      persistSettings(settings);
+    }, 500);
+  }
+);
+
+// 初始应用主题
+applyTheme(useSettingsStore.getState().theme);

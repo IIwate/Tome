@@ -1,0 +1,40 @@
+{
+  "name": "reader",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2",
+    "@tauri-apps/plugin-fs": "^2",
+    "@tauri-apps/plugin-store": "^2",
+    "class-variance-authority": "^0.7",
+    "clsx": "^2",
+    "fflate": "^0.8.2",
+    "foliate-js": "^1.0.1",
+    "framer-motion": "^11",
+    "lucide-react": "^0.468",
+    "react": "^19",
+    "react-dom": "^19",
+    "tailwind-merge": "^2",
+    "zustand": "^5"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^4",
+    "autoprefixer": "^10",
+    "postcss": "^8",
+    "tailwindcss": "^3",
+    "tailwindcss-animate": "^1",
+    "typescript": "~5.7",
+    "vite": "^6"
+  }
+}

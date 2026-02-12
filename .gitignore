@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Tauri
+src-tauri/target/
+
+# Environment
+.env*
+*.key
+*.pem
+
+# IDE / AI / Spec
+.vscode/
+.idea/
+.ace-tool/
+.claude/
+openspec/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
