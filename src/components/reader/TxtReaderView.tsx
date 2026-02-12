@@ -34,20 +34,21 @@ function buildSegments(content: TxtContent): TextSegment[] {
   }
 
   const segments: TextSegment[] = [];
+  const firstChapter = chapters[0]!;
 
   // 首章节前的文本（序言等）
-  if (chapters[0].startOffset > 0) {
+  if (firstChapter.startOffset > 0) {
     segments.push({
       offset: 0,
       title: "",
-      text: text.slice(0, chapters[0].startOffset).trimEnd(),
+      text: text.slice(0, firstChapter.startOffset).trimEnd(),
     });
   }
 
   for (let i = 0; i < chapters.length; i++) {
-    const ch = chapters[i];
+    const ch = chapters[i]!;
     const start = ch.startOffset;
-    const end = i + 1 < chapters.length ? chapters[i + 1].startOffset : text.length;
+    const end = chapters[i + 1]?.startOffset ?? text.length;
     const raw = text.slice(start, end);
 
     let body = raw;
