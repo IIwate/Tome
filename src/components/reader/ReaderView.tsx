@@ -51,6 +51,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
     const containerRef = useRef<HTMLDivElement>(null);
     const viewRef = useRef<FoliateView | null>(null);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
 
     // 从设置 store 获取排版参数
     const fontFamily = useSettingsStore((s) => s.fontFamily);
@@ -110,18 +111,25 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       (async () => {
         try {
           setLoading(true);
+          setError(null);
           // 从 Rust 读取文件字节
           const bytes = await invoke<ArrayBuffer>("read_file_bytes", {
             path: filePath,
           });
           if (cancelled) return;
 
-          await openEpub(view, new Uint8Array(bytes), {
-            lastLocation: lastPosition ?? undefined,
-            onRelocate,
-            // getter 模式：每次事件触发时获取最新回调
-            getOnLoad: () => handleLoadRef.current,
-          });
+          // 带超时的 openEpub，防止 CSP 等问题导致永久挂起
+          await Promise.race([
+            openEpub(view, new Uint8Array(bytes), {
+              lastLocation: lastPosition ?? undefined,
+              onRelocate,
+              // getter 模式：每次事件触发时获取最新回调
+              getOnLoad: () => handleLoadRef.current,
+            }),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error("EPUB 加载超时")), 30_000)
+            ),
+          ]);
 
           if (cancelled) return;
 
@@ -131,8 +139,10 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
           }
         } catch (err) {
           if (!cancelled) {
-            console.error("EPUB 加载失败:", err);
-            onError?.(err instanceof Error ? err : new Error(String(err)));
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error("EPUB 加载失败:", msg);
+            setError(msg);
+            onError?.(err instanceof Error ? err : new Error(msg));
           }
         } finally {
           if (!cancelled) setLoading(false);
@@ -171,9 +181,16 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
 
     return (
       <div ref={containerRef} className="relative h-full w-full bg-background">
-        {loading && (
+        {loading && !error && (
           <div className="absolute inset-0 flex items-center justify-center">
-            <div className="text-sm text-muted-foreground">加载中…</div>
+            <div className="text-sm text-muted-foreground" role="status">
+              加载中…
+            </div>
+          </div>
+        )}
+        {error && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
+            <div className="text-sm text-destructive">加载失败：{error}</div>
           </div>
         )}
       </div>
