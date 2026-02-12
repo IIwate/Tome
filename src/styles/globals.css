@@ -119,3 +119,39 @@
 .settings-slider::-webkit-slider-thumb:active {
   transform: scale(1.25);
 }
+
+/* 阅读区域自定义滚动条 */
+.reader-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.reader-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.reader-scroll::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.25);
+  border-radius: 9999px;
+}
+
+.reader-scroll::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.4);
+}
+
+/* 书架滚动条 */
+.shelf-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.shelf-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.shelf-scroll::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 9999px;
+}
+
+.shelf-scroll::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.3);
+}

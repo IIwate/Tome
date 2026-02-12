@@ -77,11 +77,16 @@ export function ControlOverlay({
 
   return (
     <div
-      className="pointer-events-none absolute inset-0 z-30 flex flex-col justify-between transition-opacity duration-300"
-      style={{ opacity: visible ? 1 : 0 }}
+      className="pointer-events-none absolute inset-0 z-30 flex flex-col justify-between"
     >
       {/* 顶部栏 */}
-      <div className={`${interactiveClass} flex items-center gap-3 bg-background/80 px-4 py-2 backdrop-blur-sm`}>
+      <div
+        className={`${interactiveClass} flex items-center gap-3 bg-background/80 px-4 py-2 backdrop-blur-md transition-all duration-300 ease-out`}
+        style={{
+          opacity: visible ? 1 : 0,
+          transform: visible ? "translateY(0)" : "translateY(-100%)",
+        }}
+      >
         <button
           onClick={onBack}
           aria-label="返回书架"
@@ -111,7 +116,13 @@ export function ControlOverlay({
       </div>
 
       {/* 底部栏 */}
-      <div className={`${interactiveClass} bg-background/80 backdrop-blur-sm`}>
+      <div
+        className={`${interactiveClass} bg-background/80 backdrop-blur-md transition-all duration-300 ease-out`}
+        style={{
+          opacity: visible ? 1 : 0,
+          transform: visible ? "translateY(0)" : "translateY(100%)",
+        }}
+      >
         <ReadingProgressBar percent={percent} />
       </div>
     </div>

@@ -12,7 +12,9 @@ export function BookGrid({ books, onBookClick }: BookGridProps) {
     return (
       <div className="flex h-full items-center justify-center">
         <div className="text-center">
-          <BookPlus className="mx-auto h-16 w-16 text-muted-foreground/30" />
+          <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-2xl bg-muted/60">
+            <BookPlus className="h-10 w-10 text-muted-foreground/30" />
+          </div>
           <p className="mt-4 text-lg font-medium text-muted-foreground">
             书架空空如也
           </p>
@@ -25,7 +27,7 @@ export function BookGrid({ books, onBookClick }: BookGridProps) {
   }
 
   return (
-    <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-6 p-6">
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-x-5 gap-y-6 p-6">
       {books.map((book) => (
         <BookCard key={book.id} book={book} onClick={() => onBookClick(book)} />
       ))}

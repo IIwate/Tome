@@ -51,13 +51,13 @@ export function ChapterNav({ toc, open, onClose, onNavigate }: ChapterNavProps) 
     <>
       {/* 遮罩层 */}
       <div
-        className="fixed inset-0 z-40 bg-black/30"
+        className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[2px] animate-in fade-in duration-200"
         onClick={onClose}
       />
       {/* 侧边面板 */}
-      <div className="fixed left-0 top-0 z-50 flex h-full w-72 flex-col bg-card shadow-xl animate-in slide-in-from-left duration-200">
+      <div className="fixed left-0 top-0 z-50 flex h-full w-72 flex-col border-r border-border/50 bg-card/80 shadow-2xl backdrop-blur-xl animate-in slide-in-from-left duration-200">
         {/* 标题栏 */}
-        <div className="flex items-center justify-between border-b border-border px-4 py-3">
+        <div className="flex items-center justify-between border-b border-border/50 px-4 py-3">
           <h3 className="text-sm font-semibold text-foreground">目录</h3>
           <button
             onClick={onClose}
@@ -67,7 +67,7 @@ export function ChapterNav({ toc, open, onClose, onNavigate }: ChapterNavProps) 
           </button>
         </div>
         {/* 章节列表 */}
-        <div className="flex-1 overflow-y-auto py-1">
+        <div className="reader-scroll flex-1 overflow-y-auto py-1">
           {toc.length === 0 ? (
             <p className="px-4 py-8 text-center text-xs text-muted-foreground">
               此书无目录信息

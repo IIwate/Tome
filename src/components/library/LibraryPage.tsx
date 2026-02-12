@@ -39,7 +39,7 @@ export function LibraryPage({ onOpenBook }: LibraryPageProps) {
       </div>
 
       {/* 书架网格 */}
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-auto shelf-scroll">
         <BookGrid books={books} onBookClick={onOpenBook} />
       </div>
     </div>

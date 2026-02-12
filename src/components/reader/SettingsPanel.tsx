@@ -44,6 +44,7 @@ function RangeSlider({
   onChange: (v: number) => void;
 }) {
   const id = `settings-${label}`;
+  const percent = ((value - min) / (max - min)) * 100;
 
   return (
     <div className="space-y-1.5">
@@ -64,6 +65,9 @@ function RangeSlider({
         value={value}
         onChange={(e) => onChange(snapToStep(Number(e.target.value), min, step))}
         className="settings-slider w-full"
+        style={{
+          background: `linear-gradient(to right, hsl(var(--primary) / 0.5) ${percent}%, hsl(var(--muted)) ${percent}%)`,
+        }}
       />
     </div>
   );
@@ -98,7 +102,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
     <>
       {/* 遮罩层 */}
       <div
-        className="fixed inset-0 z-40 bg-black/30"
+        className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[2px] animate-in fade-in duration-200"
         onClick={onClose}
       />
       {/* 右侧面板 */}
@@ -106,10 +110,10 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
         role="dialog"
         aria-modal="true"
         aria-label="排版设置"
-        className="fixed right-0 top-0 z-50 flex h-full w-72 flex-col bg-card shadow-xl animate-in slide-in-from-right duration-200"
+        className="fixed right-0 top-0 z-50 flex h-full w-72 flex-col border-l border-border/50 bg-card/80 shadow-2xl backdrop-blur-xl animate-in slide-in-from-right duration-200"
       >
         {/* 标题栏 */}
-        <div className="flex items-center justify-between border-b border-border px-4 py-3">
+        <div className="flex items-center justify-between border-b border-border/50 px-4 py-3">
           <h3 className="text-sm font-semibold text-foreground">排版设置</h3>
           <button
             onClick={onClose}

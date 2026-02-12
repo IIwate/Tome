@@ -76,6 +76,7 @@ export const TxtReaderView = forwardRef<TxtReaderViewHandle, TxtReaderViewProps>
     ref
   ) {
     const containerRef = useRef<HTMLDivElement>(null);
+    const contentRef = useRef<HTMLDivElement>(null);
     const [loading, setLoading] = useState(true);
     const [content, setContent] = useState<TxtContent | null>(null);
     const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -135,10 +136,12 @@ export const TxtReaderView = forwardRef<TxtReaderViewHandle, TxtReaderViewProps>
 
       requestAnimationFrame(() => {
         const container = containerRef.current;
-        if (!container) return;
+        const contentEl = contentRef.current;
+        if (!container || !contentEl) return;
         const fraction = content.text.length > 0 ? offset / content.text.length : 0;
-        const maxScroll = container.scrollHeight - container.clientHeight;
-        container.scrollTop = fraction * maxScroll;
+        const contentBottom = contentEl.offsetTop + contentEl.offsetHeight;
+        const effectiveMax = Math.max(contentBottom - container.clientHeight, 0);
+        container.scrollTop = fraction * effectiveMax;
       });
     }, [content, lastPosition]);
 
@@ -151,10 +154,14 @@ export const TxtReaderView = forwardRef<TxtReaderViewHandle, TxtReaderViewProps>
       if (!container || !content) return;
 
       const flushProgress = () => {
-        const { scrollTop, scrollHeight, clientHeight } = container;
-        const maxScroll = scrollHeight - clientHeight;
-        const percent = maxScroll > 0 ? Math.round((scrollTop / maxScroll) * 100) : 0;
-        const fraction = maxScroll > 0 ? scrollTop / maxScroll : 0;
+        const contentEl = contentRef.current;
+        if (!contentEl) return;
+        const { scrollTop, clientHeight } = container;
+        const contentBottom = contentEl.offsetTop + contentEl.offsetHeight;
+        const effectiveMax = Math.max(contentBottom - clientHeight, 0);
+        const scrollPos = Math.min(scrollTop, effectiveMax);
+        const percent = effectiveMax > 0 ? Math.round((scrollPos / effectiveMax) * 100) : 0;
+        const fraction = effectiveMax > 0 ? scrollPos / effectiveMax : 0;
         const charOffset = Math.round(fraction * content.text.length);
         onRelocateRef.current?.(charOffset, percent);
       };
@@ -192,27 +199,30 @@ export const TxtReaderView = forwardRef<TxtReaderViewHandle, TxtReaderViewProps>
     );
 
     return (
-      <div ref={containerRef} className="relative h-full overflow-y-auto bg-background">
+      <div ref={containerRef} className="reader-scroll relative h-full overflow-y-auto bg-background">
         {loading && (
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="text-sm text-muted-foreground">加载中…</div>
           </div>
         )}
         {!loading && content && (
-          <div className="mx-auto max-w-3xl py-6" style={textStyle}>
-            {segments.map((seg, i) => (
-              <div key={i} data-offset={seg.offset}>
-                {seg.title && (
-                  <h2 className="mb-4 mt-8 text-lg font-bold text-foreground first:mt-0">
-                    {seg.title}
-                  </h2>
-                )}
-                <div className="whitespace-pre-wrap break-words text-foreground">
-                  {seg.text}
+          <>
+            <div ref={contentRef} className="mx-auto max-w-3xl py-8" style={textStyle}>
+              {segments.map((seg, i) => (
+                <div key={i} data-offset={seg.offset}>
+                  {seg.title && (
+                    <h2 className="mb-4 mt-8 text-lg font-bold text-foreground first:mt-0">
+                      {seg.title}
+                    </h2>
+                  )}
+                  <div className="whitespace-pre-wrap break-words text-foreground">
+                    {seg.text}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+            <div className="h-[40vh]" aria-hidden="true" />
+          </>
         )}
       </div>
     );
