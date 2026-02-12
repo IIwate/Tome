@@ -10,16 +10,38 @@ const DC_NS = "http://purl.org/dc/elements/1.1/";
 
 function resolvePath(base: string, relative: string): string {
   if (relative.startsWith("/")) return relative.slice(1);
-  const dir = base.substring(0, base.lastIndexOf("/") + 1);
-  return dir + relative;
+  const parts = base.substring(0, base.lastIndexOf("/") + 1).split("/");
+  for (const seg of relative.split("/")) {
+    if (seg === "..") parts.pop();
+    else if (seg !== ".") parts.push(seg);
+  }
+  return parts.filter(Boolean).join("/");
 }
 
 function bytesToDataUrl(bytes: Uint8Array, mediaType: string): string {
-  let binary = "";
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]!);
+  const CHUNK = 0x8000;
+  const parts: string[] = [];
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    parts.push(
+      String.fromCharCode.apply(
+        null,
+        bytes.subarray(i, i + CHUNK) as unknown as number[]
+      )
+    );
   }
-  return `data:${mediaType};base64,${btoa(binary)}`;
+  return `data:${mediaType};base64,${btoa(parts.join(""))}`;
+}
+
+/** 在 manifest items 中按 id 查找（避免 querySelector 注入） */
+function findItemById(
+  opfDoc: Document,
+  id: string
+): Element | null {
+  const items = opfDoc.querySelectorAll("item");
+  for (const item of items) {
+    if (item.getAttribute("id") === id) return item;
+  }
+  return null;
 }
 
 export function extractEpubMeta(fileBytes: Uint8Array): EpubMeta {
@@ -62,7 +84,7 @@ export function extractEpubMeta(fileBytes: Uint8Array): EpubMeta {
   const coverMeta = opfDoc.querySelector('meta[name="cover"]');
   const coverId = coverMeta?.getAttribute("content");
   if (coverId) {
-    const item = opfDoc.querySelector(`item[id="${coverId}"]`);
+    const item = findItemById(opfDoc, coverId);
     if (item) {
       const href = item.getAttribute("href") || "";
       const fullPath = resolvePath(opfPath, href);

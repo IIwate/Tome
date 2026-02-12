@@ -11,10 +11,18 @@ pub struct ScannedBook {
 
 #[tauri::command]
 pub fn scan_books(root: String, extensions: Vec<String>) -> Result<Vec<ScannedBook>, String> {
+    // 校验扫描根目录
+    let canonical_root = std::path::Path::new(&root)
+        .canonicalize()
+        .map_err(|e| format!("路径无效: {e}"))?;
+    if !canonical_root.is_dir() {
+        return Err("指定路径不是目录".to_string());
+    }
+
     let exts: Vec<String> = extensions.iter().map(|e| e.to_lowercase()).collect();
     let mut books = Vec::new();
 
-    for entry in WalkDir::new(&root)
+    for entry in WalkDir::new(&canonical_root)
         .max_depth(5)
         .into_iter()
         .filter_map(|e| e.ok())

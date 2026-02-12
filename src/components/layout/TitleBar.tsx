@@ -7,6 +7,9 @@ export function TitleBar() {
   const [maximized, setMaximized] = useState(false);
 
   useEffect(() => {
+    // 初始化时获取当前最大化状态
+    appWindow.isMaximized().then(setMaximized);
+
     const unlisten = appWindow.onResized(() => {
       appWindow.isMaximized().then(setMaximized);
     });

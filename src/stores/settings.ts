@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
+import { shallow } from "zustand/shallow";
 import { loadPersistedSettings, persistSettings } from "@/lib/tauri-store";
 
 export type Theme = "light" | "dark" | "sepia";
@@ -30,6 +31,10 @@ const DEFAULTS: Omit<SettingsState, "_hydrated"> = {
   margin: 60,
 };
 
+function applyTheme(theme: Theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+}
+
 export const useSettingsStore = create<SettingsState & SettingsActions>()(
   subscribeWithSelector((set) => ({
     ...DEFAULTS,
@@ -48,17 +53,20 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
   }))
 );
 
-function applyTheme(theme: Theme) {
-  document.documentElement.setAttribute("data-theme", theme);
-}
-
-// 主题变更时同步到 DOM
+// 主题变更时同步到 DOM + localStorage 缓存
 useSettingsStore.subscribe(
   (s) => s.theme,
-  (theme) => applyTheme(theme)
+  (theme) => {
+    applyTheme(theme);
+    try {
+      localStorage.setItem("reader-theme", theme);
+    } catch {
+      // localStorage 不可用时忽略
+    }
+  }
 );
 
-// 设置变更时自动持久化（排除内部字段）
+// 设置变更时自动持久化（shallow 比较避免无变更触发）
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
 useSettingsStore.subscribe(
@@ -75,8 +83,16 @@ useSettingsStore.subscribe(
     saveTimer = setTimeout(() => {
       persistSettings(settings);
     }, 500);
-  }
+  },
+  { equalityFn: shallow }
 );
 
-// 初始应用主题
-applyTheme(useSettingsStore.getState().theme);
+// 启动时快速恢复主题（同步读取 localStorage 缓存，避免闪烁）
+const cachedTheme = (() => {
+  try {
+    return localStorage.getItem("reader-theme") as Theme | null;
+  } catch {
+    return null;
+  }
+})();
+applyTheme(cachedTheme || DEFAULTS.theme);

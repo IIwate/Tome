@@ -2,11 +2,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { LibraryPage } from "@/components/library/LibraryPage";
 import { ReaderView, type ReaderViewHandle } from "@/components/reader/ReaderView";
+import { TxtReaderView, type TxtReaderViewHandle } from "@/components/reader/TxtReaderView";
 import { ChapterNav } from "@/components/reader/ChapterNav";
 import { useSettingsStore } from "@/stores/settings";
 import { useLibraryStore, type Book } from "@/stores/library";
 import { ArrowLeft, List } from "lucide-react";
 import type { FoliateLocation, FoliateTocItem } from "@/lib/foliate";
+import type { TxtChapter } from "@/lib/txt-parser";
 
 type AppView = "library" | "reader";
 
@@ -21,6 +23,7 @@ function App() {
   const [chapterNavOpen, setChapterNavOpen] = useState(false);
 
   const readerRef = useRef<ReaderViewHandle>(null);
+  const txtReaderRef = useRef<TxtReaderViewHandle>(null);
 
   useEffect(() => {
     hydrateSettings();
@@ -28,11 +31,6 @@ function App() {
   }, [hydrateSettings, hydrateLibrary]);
 
   const handleOpenBook = useCallback((book: Book) => {
-    if (book.format !== "epub") {
-      // TXT 阅读器在后续阶段实现
-      console.log("TXT 阅读器尚未实现:", book.title);
-      return;
-    }
     setSelectedBook(book);
     setCurrentView("reader");
     updateBook(book.id, { lastOpenedAt: Date.now() });
@@ -58,16 +56,43 @@ function App() {
     [selectedBook, updateBook]
   );
 
+  const handleTxtRelocate = useCallback(
+    (charOffset: number, percent: number) => {
+      if (!selectedBook) return;
+      updateBook(selectedBook.id, {
+        progress: {
+          position: charOffset.toString(),
+          percent,
+        },
+      });
+    },
+    [selectedBook, updateBook]
+  );
+
   const handleTocLoaded = useCallback((items: FoliateTocItem[]) => {
     setToc(items);
+  }, []);
+
+  const handleTxtChaptersLoaded = useCallback((chapters: TxtChapter[]) => {
+    setToc(
+      chapters.map((ch) => ({
+        label: ch.title,
+        href: ch.startOffset.toString(),
+      }))
+    );
   }, []);
 
   const handleChapterNavigate = useCallback(
     async (href: string) => {
       setChapterNavOpen(false);
-      await readerRef.current?.goTo(href);
+      if (selectedBook?.format === "txt") {
+        const offset = parseInt(href, 10);
+        if (!isNaN(offset)) txtReaderRef.current?.scrollToOffset(offset);
+      } else {
+        await readerRef.current?.goTo(href);
+      }
     },
-    []
+    [selectedBook?.format]
   );
 
   return (
@@ -97,18 +122,31 @@ function App() {
             )}
           </div>
 
-          {/* EPUB 阅读区域 */}
+          {/* 阅读区域 */}
           <div className="flex-1 overflow-hidden">
-            <ReaderView
-              ref={readerRef}
-              filePath={selectedBook.path}
-              lastPosition={selectedBook.progress.position}
-              onRelocate={handleRelocate}
-              onTocLoaded={handleTocLoaded}
-              onError={(err) =>
-                console.error("阅读器错误:", err.message)
-              }
-            />
+            {selectedBook.format === "epub" ? (
+              <ReaderView
+                ref={readerRef}
+                filePath={selectedBook.path}
+                lastPosition={selectedBook.progress.position}
+                onRelocate={handleRelocate}
+                onTocLoaded={handleTocLoaded}
+                onError={(err) =>
+                  console.error("阅读器错误:", err.message)
+                }
+              />
+            ) : (
+              <TxtReaderView
+                ref={txtReaderRef}
+                filePath={selectedBook.path}
+                lastPosition={selectedBook.progress.position}
+                onRelocate={handleTxtRelocate}
+                onChaptersLoaded={handleTxtChaptersLoaded}
+                onError={(err) =>
+                  console.error("阅读器错误:", err.message)
+                }
+              />
+            )}
           </div>
 
           {/* 章节导航 */}

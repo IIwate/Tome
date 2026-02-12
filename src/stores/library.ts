@@ -32,6 +32,7 @@ interface ScannedBook {
 interface LibraryState {
   books: Book[];
   _hydrated: boolean;
+  _importing: boolean;
 }
 
 interface LibraryActions {
@@ -43,20 +44,20 @@ interface LibraryActions {
   hydrate: () => Promise<void>;
 }
 
+function normalizePath(path: string): string {
+  return path.replace(/\\/g, "/").toLowerCase();
+}
+
 function filenameFromPath(path: string): string {
   const name = path.replace(/\\/g, "/").split("/").pop() || "";
   return name.replace(/\.(txt|epub)$/i, "");
 }
 
-/** 导入单个文件到书架（去重、元数据提取） */
+/** 导入单个文件到书架（元数据提取，不含去重） */
 async function importSingleFile(
   filePath: string,
-  existingBooks: Book[],
   fileSize?: number
-): Promise<Book | null> {
-  // 去重
-  if (existingBooks.some((b) => b.path === filePath)) return null;
-
+): Promise<Book> {
   const ext = filePath.toLowerCase().split(".").pop();
   const format: "epub" | "txt" = ext === "epub" ? "epub" : "txt";
 
@@ -97,6 +98,7 @@ export const useLibraryStore = create<LibraryState & LibraryActions>()(
   subscribeWithSelector((set, get) => ({
     books: [],
     _hydrated: false,
+    _importing: false,
 
     addBook: (book) => set((s) => ({ books: [...s.books, book] })),
 
@@ -109,46 +111,79 @@ export const useLibraryStore = create<LibraryState & LibraryActions>()(
       })),
 
     importFiles: async () => {
-      const selected = await open({
-        multiple: true,
-        filters: [{ name: "书籍", extensions: ["txt", "epub"] }],
-      });
-      if (!selected) return;
+      if (get()._importing) return;
+      set({ _importing: true });
 
-      const paths = Array.isArray(selected) ? selected : [selected];
+      try {
+        const selected = await open({
+          multiple: true,
+          filters: [{ name: "书籍", extensions: ["txt", "epub"] }],
+        });
+        if (!selected) return;
 
-      for (const filePath of paths) {
-        try {
-          const book = await importSingleFile(filePath, get().books);
-          if (book) set((s) => ({ books: [...s.books, book] }));
-        } catch (e) {
-          console.error(`导入失败: ${filePath}`, e);
+        const paths = Array.isArray(selected) ? selected : [selected];
+        const existingPaths = new Set(get().books.map((b) => normalizePath(b.path)));
+        const imported: Book[] = [];
+
+        for (const filePath of paths) {
+          if (existingPaths.has(normalizePath(filePath))) continue;
+          try {
+            const book = await importSingleFile(filePath);
+            imported.push(book);
+            existingPaths.add(normalizePath(filePath));
+          } catch (e) {
+            console.error(`导入失败: ${filePath}`, e);
+          }
         }
+
+        if (imported.length > 0) {
+          set((s) => ({ books: [...s.books, ...imported] }));
+        }
+      } finally {
+        set({ _importing: false });
       }
     },
 
     scanFolder: async () => {
-      const folder = await open({ directory: true });
-      if (!folder) return;
+      if (get()._importing) return;
+      set({ _importing: true });
 
-      const scanned = await invoke<ScannedBook[]>("scan_books", {
-        root: folder,
-        extensions: ["txt", "epub"],
-      });
+      try {
+        const folder = await open({ directory: true });
+        if (!folder) return;
 
-      if (scanned.length === 0) return;
-
-      for (const item of scanned) {
+        let scanned: ScannedBook[];
         try {
-          const book = await importSingleFile(
-            item.path,
-            get().books,
-            item.size
-          );
-          if (book) set((s) => ({ books: [...s.books, book] }));
+          scanned = await invoke<ScannedBook[]>("scan_books", {
+            root: folder,
+            extensions: ["txt", "epub"],
+          });
         } catch (e) {
-          console.error(`导入失败: ${item.path}`, e);
+          console.error("扫描目录失败:", e);
+          return;
         }
+
+        if (scanned.length === 0) return;
+
+        const existingPaths = new Set(get().books.map((b) => normalizePath(b.path)));
+        const imported: Book[] = [];
+
+        for (const item of scanned) {
+          if (existingPaths.has(normalizePath(item.path))) continue;
+          try {
+            const book = await importSingleFile(item.path, item.size);
+            imported.push(book);
+            existingPaths.add(normalizePath(item.path));
+          } catch (e) {
+            console.error(`导入失败: ${item.path}`, e);
+          }
+        }
+
+        if (imported.length > 0) {
+          set((s) => ({ books: [...s.books, ...imported] }));
+        }
+      } finally {
+        set({ _importing: false });
       }
     },
 
@@ -162,7 +197,7 @@ export const useLibraryStore = create<LibraryState & LibraryActions>()(
   }))
 );
 
-// 书籍列表变更时自动持久化
+// 书籍列表变更时自动持久化（2s debounce 减轻 I/O 压力）
 let libSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
 useLibraryStore.subscribe(
@@ -172,6 +207,6 @@ useLibraryStore.subscribe(
     if (libSaveTimer) clearTimeout(libSaveTimer);
     libSaveTimer = setTimeout(() => {
       persistSettings({ books }, "library.json");
-    }, 500);
+    }, 2000);
   }
 );
