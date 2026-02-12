@@ -117,6 +117,7 @@ export function injectStyles(
     fontFamily: string;
     fontSize: number;
     lineHeight: number;
+    margin: number;
     color: string;
     background: string;
   }
@@ -128,6 +129,10 @@ export function injectStyles(
     html, body {
       color: ${styles.color} !important;
       background: ${styles.background} !important;
+    }
+    body {
+      padding-left: ${styles.margin}px !important;
+      padding-right: ${styles.margin}px !important;
     }
     body, p, div, span, li, td, th, blockquote, cite, pre, code {
       font-family: ${styles.fontFamily}, system-ui, sans-serif !important;

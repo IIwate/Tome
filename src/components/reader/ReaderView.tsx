@@ -56,6 +56,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
     const fontFamily = useSettingsStore((s) => s.fontFamily);
     const fontSize = useSettingsStore((s) => s.fontSize);
     const lineHeight = useSettingsStore((s) => s.lineHeight);
+    const margin = useSettingsStore((s) => s.margin);
     const theme = useSettingsStore((s) => s.theme);
 
     // 用 ref 存储最新的样式注入函数，避免闭包过期
@@ -69,11 +70,12 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
           fontFamily,
           fontSize,
           lineHeight,
+          margin,
           color: getCssColor("--foreground"),
           background: getCssColor("--background"),
         });
       },
-      [fontFamily, fontSize, lineHeight, theme]
+      [fontFamily, fontSize, lineHeight, margin, theme]
     );
 
     // 暴露 goTo 方法给父组件
@@ -159,12 +161,13 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
             fontFamily,
             fontSize,
             lineHeight,
+            margin,
             color: getCssColor("--foreground"),
             background: getCssColor("--background"),
           });
         }
       }
-    }, [fontFamily, fontSize, lineHeight, theme]);
+    }, [fontFamily, fontSize, lineHeight, margin, theme]);
 
     return (
       <div ref={containerRef} className="relative h-full w-full bg-background">

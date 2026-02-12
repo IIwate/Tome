@@ -5,10 +5,11 @@ import { ReaderView, type ReaderViewHandle } from "@/components/reader/ReaderVie
 import { TxtReaderView, type TxtReaderViewHandle } from "@/components/reader/TxtReaderView";
 import { ChapterNav } from "@/components/reader/ChapterNav";
 import { ReadingProgressBar } from "@/components/reader/ReadingProgressBar";
+import { SettingsPanel } from "@/components/reader/SettingsPanel";
 import { useSettingsStore } from "@/stores/settings";
 import { useLibraryStore, type Book } from "@/stores/library";
 import { useReaderStore } from "@/stores/reader";
-import { ArrowLeft, List } from "lucide-react";
+import { ArrowLeft, List, Settings } from "lucide-react";
 import type { FoliateLocation, FoliateTocItem } from "@/lib/foliate";
 import type { TxtChapter } from "@/lib/txt-parser";
 
@@ -29,6 +30,7 @@ function App() {
   const [currentView, setCurrentView] = useState<AppView>("library");
   const [selectedBook, setSelectedBook] = useState<Book | null>(null);
   const [chapterNavOpen, setChapterNavOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const readerRef = useRef<ReaderViewHandle>(null);
   const txtReaderRef = useRef<TxtReaderViewHandle>(null);
@@ -49,6 +51,7 @@ function App() {
     setCurrentView("library");
     setSelectedBook(null);
     setChapterNavOpen(false);
+    setSettingsOpen(false);
     closeBookInReader();
   }, [closeBookInReader]);
 
@@ -134,6 +137,13 @@ function App() {
                 <List className="h-4 w-4" />
               </button>
             )}
+            <button
+              onClick={() => setSettingsOpen(true)}
+              aria-label="排版设置"
+              className="rounded-lg p-1.5 text-foreground/70 hover:bg-accent hover:text-foreground transition-colors"
+            >
+              <Settings className="h-4 w-4" />
+            </button>
           </div>
 
           {/* 阅读区域 */}
@@ -172,6 +182,12 @@ function App() {
             open={chapterNavOpen}
             onClose={() => setChapterNavOpen(false)}
             onNavigate={handleChapterNavigate}
+          />
+
+          {/* 排版设置 */}
+          <SettingsPanel
+            open={settingsOpen}
+            onClose={() => setSettingsOpen(false)}
           />
         </div>
       ) : null}

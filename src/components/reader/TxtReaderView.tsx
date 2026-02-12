@@ -83,6 +83,7 @@ export const TxtReaderView = forwardRef<TxtReaderViewHandle, TxtReaderViewProps>
     const fontFamily = useSettingsStore((s) => s.fontFamily);
     const fontSize = useSettingsStore((s) => s.fontSize);
     const lineHeight = useSettingsStore((s) => s.lineHeight);
+    const margin = useSettingsStore((s) => s.margin);
 
     useImperativeHandle(
       ref,
@@ -184,8 +185,10 @@ export const TxtReaderView = forwardRef<TxtReaderViewHandle, TxtReaderViewProps>
         fontFamily: `${fontFamily}, system-ui, sans-serif`,
         fontSize: `${fontSize}px`,
         lineHeight,
+        paddingLeft: `${margin}px`,
+        paddingRight: `${margin}px`,
       }),
-      [fontFamily, fontSize, lineHeight]
+      [fontFamily, fontSize, lineHeight, margin]
     );
 
     return (
@@ -196,7 +199,7 @@ export const TxtReaderView = forwardRef<TxtReaderViewHandle, TxtReaderViewProps>
           </div>
         )}
         {!loading && content && (
-          <div className="mx-auto max-w-3xl px-8 py-6" style={textStyle}>
+          <div className="mx-auto max-w-3xl py-6" style={textStyle}>
             {segments.map((seg, i) => (
               <div key={i} data-offset={seg.offset}>
                 {seg.title && (
