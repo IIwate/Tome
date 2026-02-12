@@ -5,6 +5,9 @@
 
 // 注册 <foliate-view> 自定义元素
 import "foliate-js/view.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore — makeBook 是 foliate-js 内部导出，无类型声明
+import { makeBook } from "foliate-js/view.js";
 
 /* ---------- 类型定义 ---------- */
 
@@ -34,9 +37,52 @@ export interface FoliateBook {
   rendition?: { layout?: string };
 }
 
+/** EPUB section（spine 条目），带加载/卸载方法 */
+export interface EpubSection {
+  id: string;
+  /** 加载并返回 blob URL（所有资源已解析为 blob URL） */
+  load: () => Promise<string>;
+  /** 释放 blob URL（引用计数，递归释放子资源） */
+  unload: () => void;
+  /** 返回原始 DOM（资源未解析，不含 blob URL） */
+  createDocument: () => Promise<Document>;
+  size: number;
+  cfi?: string;
+  linear?: string;
+}
+
+/** makeBook() 返回的完整 EPUB 对象 */
+export interface ParsedEpub {
+  metadata: {
+    title?: string;
+    language?: string[] | string;
+    identifier?: string;
+  };
+  rendition?: { layout?: string };
+  sections: EpubSection[];
+  toc?: FoliateTocItem[];
+  dir?: string;
+  resolveHref?: (
+    href: string
+  ) => { index: number; anchor?: (doc: Document) => Element | Range } | null;
+  destroy?: () => void;
+}
+
 export interface FoliateRenderer extends HTMLElement {
   getContents(): { doc: Document; index: number }[];
   goTo(target: unknown): Promise<void>;
+  /** 当前滚动偏移量 */
+  readonly start: number;
+  /** 当前滚动偏移量 + 视口尺寸 */
+  readonly end: number;
+  /** 内容总尺寸（scrolled 模式下为内容高度） */
+  readonly viewSize: number;
+  /** 视口尺寸 */
+  readonly size: number;
+  /** 是否在首章且无法再向前 */
+  readonly atStart: boolean;
+  /** 是否在末章且无法再向后 */
+  readonly atEnd: boolean;
 }
 
 export interface FoliateView extends HTMLElement {
@@ -165,4 +211,73 @@ export function injectStyles(
 export function closeView(view: FoliateView): void {
   view.close();
   view.remove();
+}
+
+/* ---------- 连续滚动模式 API ---------- */
+
+/**
+ * 仅解析 EPUB，不创建渲染器。
+ * 返回 book 对象，用于连续滚动模式中按 section 加载内容。
+ */
+export async function parseEpub(fileBytes: Uint8Array): Promise<ParsedEpub> {
+  const file = new File([fileBytes], "book.epub", {
+    type: "application/epub+zip",
+  });
+  return (await makeBook(file)) as ParsedEpub;
+}
+
+/**
+ * 加载 EPUB section 内容为 HTML 字符串。
+ * section.load() 返回 blob URL（资源已解析），fetch 获取完整 HTML。
+ */
+export async function fetchSectionHtml(
+  section: EpubSection
+): Promise<string> {
+  const blobUrl = await section.load();
+  if (!blobUrl) return "";
+  const resp = await fetch(blobUrl);
+  return resp.text();
+}
+
+/** 向 Shadow DOM 注入阅读排版样式 */
+export function injectShadowStyles(
+  shadow: ShadowRoot,
+  styles: {
+    fontFamily: string;
+    fontSize: number;
+    lineHeight: number;
+    margin: number;
+    color: string;
+    background: string;
+  }
+): void {
+  shadow.querySelectorAll(`style[${INJECT_ATTR}]`).forEach((el) => el.remove());
+
+  const css = `
+    :host { display: block; }
+    html, body {
+      color: ${styles.color} !important;
+      background: transparent !important;
+      margin: 0 !important;
+      padding: 0 !important;
+    }
+    body {
+      padding-left: ${styles.margin}px !important;
+      padding-right: ${styles.margin}px !important;
+    }
+    body, p, div, span, li, td, th, blockquote, cite, pre, code {
+      font-family: ${styles.fontFamily}, system-ui, sans-serif !important;
+      font-size: ${styles.fontSize}px !important;
+      line-height: ${styles.lineHeight} !important;
+    }
+    img, svg, video, canvas {
+      max-width: 100% !important;
+      height: auto !important;
+    }
+    script { display: none !important; }
+  `;
+  const el = document.createElement("style");
+  el.setAttribute(INJECT_ATTR, "");
+  el.textContent = css;
+  shadow.prepend(el);
 }

@@ -79,9 +79,9 @@ export function ControlOverlay({
     <div
       className="pointer-events-none absolute inset-0 z-30 flex flex-col justify-between"
     >
-      {/* 顶部栏 */}
+      {/* 顶部栏（mr-2 避免遮挡滚动条） */}
       <div
-        className={`${interactiveClass} flex items-center gap-3 bg-background/80 px-4 py-2 backdrop-blur-md transition-all duration-300 ease-out`}
+        className={`${interactiveClass} mr-2 flex items-center gap-3 bg-background/80 px-4 py-2 backdrop-blur-md transition-all duration-300 ease-out`}
         style={{
           opacity: visible ? 1 : 0,
           transform: visible ? "translateY(0)" : "translateY(-100%)",
@@ -115,9 +115,9 @@ export function ControlOverlay({
         </button>
       </div>
 
-      {/* 底部栏 */}
+      {/* 底部栏（mr-2 避免遮挡滚动条） */}
       <div
-        className={`${interactiveClass} bg-background/80 backdrop-blur-md transition-all duration-300 ease-out`}
+        className={`${interactiveClass} mr-2 bg-background/80 backdrop-blur-md transition-all duration-300 ease-out`}
         style={{
           opacity: visible ? 1 : 0,
           transform: visible ? "translateY(0)" : "translateY(100%)",

@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { ReaderView, type ReaderViewHandle } from "./ReaderView";
+import { EpubScrollView, type EpubScrollViewHandle } from "./EpubScrollView";
 import { TxtReaderView, type TxtReaderViewHandle } from "./TxtReaderView";
 import { ControlOverlay } from "./ControlOverlay";
 import { ChapterNav } from "./ChapterNav";
@@ -24,7 +24,7 @@ export function ReaderPage({ book, onBack }: ReaderPageProps) {
   const [chapterNavOpen, setChapterNavOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  const readerRef = useRef<ReaderViewHandle>(null);
+  const readerRef = useRef<EpubScrollViewHandle>(null);
   const txtReaderRef = useRef<TxtReaderViewHandle>(null);
 
   const handleRelocate = useCallback(
@@ -83,10 +83,10 @@ export function ReaderPage({ book, onBack }: ReaderPageProps) {
   );
 
   return (
-    <div className="relative h-full">
+    <div className="relative h-full overflow-hidden">
       {/* 阅读区域（全屏） */}
       {book.format === "epub" ? (
-        <ReaderView
+        <EpubScrollView
           ref={readerRef}
           filePath={book.path}
           lastPosition={book.progress.position}
