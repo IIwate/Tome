@@ -40,7 +40,7 @@ export function TitleBar() {
           data-tauri-drag-region
           className="text-sm font-medium text-foreground/80"
         >
-          Reader
+          Tome
         </span>
       </div>
 

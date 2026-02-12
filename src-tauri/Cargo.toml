@@ -1,10 +1,10 @@
 [package]
-name = "reader"
+name = "tome"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "reader_lib"
+name = "tome_lib"
 crate-type = ["lib", "cdylib", "staticlib"]
 
 [build-dependencies]

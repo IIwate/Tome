@@ -22,6 +22,7 @@ openspec/
 # OS
 .DS_Store
 Thumbs.db
+nul
 
 # Review artifacts
 findings.json
