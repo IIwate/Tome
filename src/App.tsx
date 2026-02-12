@@ -4,8 +4,10 @@ import { LibraryPage } from "@/components/library/LibraryPage";
 import { ReaderView, type ReaderViewHandle } from "@/components/reader/ReaderView";
 import { TxtReaderView, type TxtReaderViewHandle } from "@/components/reader/TxtReaderView";
 import { ChapterNav } from "@/components/reader/ChapterNav";
+import { ReadingProgressBar } from "@/components/reader/ReadingProgressBar";
 import { useSettingsStore } from "@/stores/settings";
 import { useLibraryStore, type Book } from "@/stores/library";
+import { useReaderStore } from "@/stores/reader";
 import { ArrowLeft, List } from "lucide-react";
 import type { FoliateLocation, FoliateTocItem } from "@/lib/foliate";
 import type { TxtChapter } from "@/lib/txt-parser";
@@ -17,9 +19,15 @@ function App() {
   const hydrateLibrary = useLibraryStore((s) => s.hydrate);
   const updateBook = useLibraryStore((s) => s.updateBook);
 
+  const openBookInReader = useReaderStore((s) => s.openBook);
+  const updateProgress = useReaderStore((s) => s.updateProgress);
+  const setChapters = useReaderStore((s) => s.setChapters);
+  const closeBookInReader = useReaderStore((s) => s.closeBook);
+  const chapters = useReaderStore((s) => s.chapters);
+  const percent = useReaderStore((s) => s.percent);
+
   const [currentView, setCurrentView] = useState<AppView>("library");
   const [selectedBook, setSelectedBook] = useState<Book | null>(null);
-  const [toc, setToc] = useState<FoliateTocItem[]>([]);
   const [chapterNavOpen, setChapterNavOpen] = useState(false);
 
   const readerRef = useRef<ReaderViewHandle>(null);
@@ -34,53 +42,59 @@ function App() {
     setSelectedBook(book);
     setCurrentView("reader");
     updateBook(book.id, { lastOpenedAt: Date.now() });
-  }, [updateBook]);
+    openBookInReader(book.id, book.progress.position, book.progress.percent);
+  }, [updateBook, openBookInReader]);
 
   const handleBack = useCallback(() => {
     setCurrentView("library");
     setSelectedBook(null);
-    setToc([]);
     setChapterNavOpen(false);
-  }, []);
+    closeBookInReader();
+  }, [closeBookInReader]);
 
   const handleRelocate = useCallback(
     (location: FoliateLocation) => {
       if (!selectedBook) return;
+      const pos = location.cfi ?? null;
+      const pct = Math.round((location.fraction ?? 0) * 100);
       updateBook(selectedBook.id, {
-        progress: {
-          position: location.cfi ?? null,
-          percent: Math.round((location.fraction ?? 0) * 100),
-        },
+        progress: { position: pos, percent: pct },
       });
+      updateProgress(pos, pct);
     },
-    [selectedBook, updateBook]
+    [selectedBook, updateBook, updateProgress]
   );
 
   const handleTxtRelocate = useCallback(
-    (charOffset: number, percent: number) => {
+    (charOffset: number, pct: number) => {
       if (!selectedBook) return;
+      const pos = charOffset.toString();
       updateBook(selectedBook.id, {
-        progress: {
-          position: charOffset.toString(),
-          percent,
-        },
+        progress: { position: pos, percent: pct },
       });
+      updateProgress(pos, pct);
     },
-    [selectedBook, updateBook]
+    [selectedBook, updateBook, updateProgress]
   );
 
-  const handleTocLoaded = useCallback((items: FoliateTocItem[]) => {
-    setToc(items);
-  }, []);
+  const handleTocLoaded = useCallback(
+    (items: FoliateTocItem[]) => {
+      setChapters(items);
+    },
+    [setChapters]
+  );
 
-  const handleTxtChaptersLoaded = useCallback((chapters: TxtChapter[]) => {
-    setToc(
-      chapters.map((ch) => ({
-        label: ch.title,
-        href: ch.startOffset.toString(),
-      }))
-    );
-  }, []);
+  const handleTxtChaptersLoaded = useCallback(
+    (txtChapters: TxtChapter[]) => {
+      setChapters(
+        txtChapters.map((ch) => ({
+          label: ch.title,
+          href: ch.startOffset.toString(),
+        }))
+      );
+    },
+    [setChapters]
+  );
 
   const handleChapterNavigate = useCallback(
     async (href: string) => {
@@ -112,7 +126,7 @@ function App() {
             <h2 className="flex-1 truncate text-sm font-medium text-foreground">
               {selectedBook.title}
             </h2>
-            {toc.length > 0 && (
+            {chapters.length > 0 && (
               <button
                 onClick={() => setChapterNavOpen(true)}
                 className="rounded-lg p-1.5 text-foreground/70 hover:bg-accent hover:text-foreground transition-colors"
@@ -149,9 +163,12 @@ function App() {
             )}
           </div>
 
+          {/* 底部进度条 */}
+          <ReadingProgressBar percent={percent} />
+
           {/* 章节导航 */}
           <ChapterNav
-            toc={toc}
+            toc={chapters}
             open={chapterNavOpen}
             onClose={() => setChapterNavOpen(false)}
             onNavigate={handleChapterNavigate}

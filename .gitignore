@@ -23,6 +23,9 @@ openspec/
 .DS_Store
 Thumbs.db
 
+# Review artifacts
+findings.json
+
 # Logs
 *.log
 npm-debug.log*
