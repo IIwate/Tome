@@ -11,6 +11,9 @@ src-tauri/target/
 .env*
 *.key
 *.pem
+*.p12
+*.pfx
+*.cert
 
 # IDE / AI / Spec
 .vscode/
