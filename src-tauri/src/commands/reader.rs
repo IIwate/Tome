@@ -150,3 +150,39 @@ pub fn read_txt_file(path: String) -> Result<TxtContent, String> {
         encoding,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn split_chapters_with_chinese_headings() {
+        let text = "第一章 起始\n内容A\n第二章 继续\n内容B";
+        let chapters = split_chapters(text, "fallback");
+
+        assert_eq!(chapters.len(), 2);
+        assert_eq!(chapters[0].title, "第一章 起始");
+        assert_eq!(chapters[0].start_offset, 0);
+        assert_eq!(chapters[1].title, "第二章 继续");
+    }
+
+    #[test]
+    fn split_chapters_falls_back_to_single_section() {
+        let text = "没有章节标记的纯文本";
+        let chapters = split_chapters(text, "回退标题");
+
+        assert_eq!(chapters.len(), 1);
+        assert_eq!(chapters[0].title, "回退标题");
+        assert_eq!(chapters[0].start_offset, 0);
+    }
+
+    #[test]
+    fn byte_to_utf16_map_handles_surrogate_pairs() {
+        let map = build_byte_to_utf16_map("A😀B");
+        // A(1字节,1码元) + 😀(4字节,2码元) + B(1字节,1码元)
+        assert_eq!(map[0], 0);
+        assert_eq!(map[1], 1);
+        assert_eq!(map[5], 3);
+        assert_eq!(map[6], 4);
+    }
+}

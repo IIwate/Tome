@@ -165,7 +165,7 @@ export const EpubScrollView = forwardRef<
   const sectionEls = useRef<Map<number, HTMLDivElement>>(new Map());
   const shadowRoots = useRef<Map<number, ShadowRoot>>(new Map());
   const linearIndices = useRef<number[]>([]);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onRelocateRef = useRef(onRelocate);
   onRelocateRef.current = onRelocate;
 

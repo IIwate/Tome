@@ -1,0 +1,103 @@
+name: Auto Merge
+
+on:
+  pull_request_target:
+    types: [labeled, synchronize, reopened, ready_for_review]
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+
+jobs:
+  automerge:
+    name: 条件自动合并
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检查条件并合并
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const labelName = "automerge";
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const isWorkflowRun = context.eventName === "workflow_run";
+            if (isWorkflowRun && context.payload.workflow_run.conclusion !== "success") {
+              core.info("CI 未成功，跳过自动合并。");
+              return;
+            }
+
+            const prNumbers = [];
+            if (isWorkflowRun) {
+              for (const pr of context.payload.workflow_run.pull_requests || []) {
+                prNumbers.push(pr.number);
+              }
+            } else {
+              prNumbers.push(context.payload.pull_request.number);
+            }
+
+            if (prNumbers.length === 0) {
+              core.info("当前事件无关联 PR，跳过。");
+              return;
+            }
+
+            for (const pull_number of prNumbers) {
+              const { data: pr } = await github.rest.pulls.get({
+                owner,
+                repo,
+                pull_number,
+              });
+
+              if (pr.state !== "open") {
+                core.info(`PR #${pull_number} 已关闭，跳过。`);
+                continue;
+              }
+
+              if (pr.draft) {
+                core.info(`PR #${pull_number} 是草稿，跳过。`);
+                continue;
+              }
+
+              const hasLabel = (pr.labels || []).some((label) => label.name === labelName);
+              if (!hasLabel) {
+                core.info(`PR #${pull_number} 缺少 ${labelName} 标签，跳过。`);
+                continue;
+              }
+
+              const runs = await github.paginate(github.rest.actions.listWorkflowRunsForRepo, {
+                owner,
+                repo,
+                event: "pull_request",
+                head_sha: pr.head.sha,
+                per_page: 100,
+              });
+              const ciRuns = runs.filter((run) => run.name === "CI");
+              if (ciRuns.length === 0) {
+                core.info(`PR #${pull_number} 尚无 CI 记录，跳过。`);
+                continue;
+              }
+
+              ciRuns.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+              const latestCi = ciRuns[0];
+              if (latestCi.status !== "completed" || latestCi.conclusion !== "success") {
+                core.info(`PR #${pull_number} 的 CI 结果不是 success，跳过。`);
+                continue;
+              }
+
+              try {
+                await github.rest.pulls.merge({
+                  owner,
+                  repo,
+                  pull_number,
+                  merge_method: "squash",
+                });
+                core.info(`PR #${pull_number} 已自动合并。`);
+              } catch (error) {
+                core.warning(`PR #${pull_number} 自动合并失败: ${error.message}`);
+              }
+            }
+

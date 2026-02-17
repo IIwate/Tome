@@ -90,6 +90,7 @@ export function ControlOverlay({
         <button
           onClick={onBack}
           aria-label="返回书架"
+          data-testid="back-library-button"
           className="rounded-lg p-1.5 text-foreground/70 hover:bg-accent hover:text-foreground transition-colors"
         >
           <ArrowLeft className="h-4 w-4" />
@@ -101,6 +102,7 @@ export function ControlOverlay({
           <button
             onClick={onOpenChapters}
             aria-label="章节目录"
+            data-testid="open-chapters-button"
             className="rounded-lg p-1.5 text-foreground/70 hover:bg-accent hover:text-foreground transition-colors"
           >
             <List className="h-4 w-4" />
