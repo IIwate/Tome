@@ -170,7 +170,7 @@ export const EpubScrollView = forwardRef<
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [loadProgress, setLoadProgress] = useState("");
+  const [showSpinner, setShowSpinner] = useState(false);
 
   // 排版设置
   const fontFamily = useSettingsStore((s) => s.fontFamily);
@@ -239,7 +239,6 @@ export const EpubScrollView = forwardRef<
       try {
         setLoading(true);
         setError(null);
-        setLoadProgress("正在读取文件…");
 
         // 1. 读取文件
         const bytes = await invoke<ArrayBuffer>("read_file_bytes", {
@@ -248,7 +247,6 @@ export const EpubScrollView = forwardRef<
         if (cancelled) return;
 
         // 2. 解析 EPUB
-        setLoadProgress("正在解析书籍…");
         const book = await parseEpub(new Uint8Array(bytes));
         if (cancelled) return;
         bookRef.current = book;
@@ -278,8 +276,6 @@ export const EpubScrollView = forwardRef<
           if (si == null) continue;
           const section = book.sections[si];
           if (!section) continue;
-
-          setLoadProgress(`加载章节 ${li + 1}/${indices.length}…`);
 
           const html = await fetchSectionHtml(section);
           if (cancelled) return;
@@ -367,6 +363,17 @@ export const EpubScrollView = forwardRef<
     // filePath 变更时重新加载
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filePath]);
+
+  // ---------- 延迟显示 spinner（避免短加载闪烁） ----------
+
+  useEffect(() => {
+    if (!loading) {
+      setShowSpinner(false);
+      return;
+    }
+    const timer = setTimeout(() => setShowSpinner(true), 300);
+    return () => clearTimeout(timer);
+  }, [loading]);
 
   // ---------- 设置变更 → 重新注入样式 ----------
 
@@ -541,11 +548,9 @@ export const EpubScrollView = forwardRef<
       ref={containerRef}
       className="reader-scroll relative h-full overflow-y-auto bg-background"
     >
-      {loading && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
-          <div className="text-sm text-muted-foreground" role="status">
-            {loadProgress || "加载中…"}
-          </div>
+      {showSpinner && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center" role="status">
+          <div className="h-5 w-5 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
         </div>
       )}
       {error && (
@@ -554,7 +559,10 @@ export const EpubScrollView = forwardRef<
         </div>
       )}
       {/* 章节内容容器 */}
-      <div ref={contentRef} className="mx-auto max-w-3xl py-8">
+      <div
+        ref={contentRef}
+        className={`mx-auto max-w-3xl py-8 transition-opacity duration-150 ${loading ? "opacity-0" : "opacity-100"}`}
+      >
         {/* 章节宿主 div 通过 DOM API 动态插入 */}
       </div>
       {/* 底部留白：允许最后一章内容滚到视口中间 */}

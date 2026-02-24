@@ -54,6 +54,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
     const viewRef = useRef<FoliateView | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [showSpinner, setShowSpinner] = useState(false);
 
     // 从设置 store 获取排版参数
     const fontFamily = useSettingsStore((s) => s.fontFamily);
@@ -197,6 +198,16 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       }
     }, [fontFamily, fontSize, lineHeight, margin, theme]);
 
+    // 延迟显示 spinner（避免短加载闪烁）
+    useEffect(() => {
+      if (!loading) {
+        setShowSpinner(false);
+        return;
+      }
+      const timer = setTimeout(() => setShowSpinner(true), 300);
+      return () => clearTimeout(timer);
+    }, [loading]);
+
     // 章节间导航：iframe 内 wheel 边界检测 + 键盘快捷键
     // foliate 在 iframe 中渲染章节内容，wheel 事件不会跨文档冒泡，
     // 因此必须在每个章节文档内部监听 wheel 事件。
@@ -301,11 +312,9 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
 
     return (
       <div ref={containerRef} className="relative h-full w-full bg-background">
-        {loading && !error && (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="text-sm text-muted-foreground" role="status">
-              加载中…
-            </div>
+        {showSpinner && !error && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center" role="status">
+            <div className="h-5 w-5 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
           </div>
         )}
         {error && (
