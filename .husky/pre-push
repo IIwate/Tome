@@ -1,0 +1,19 @@
+#!/usr/bin/env sh
+
+echo "pre-push: 运行测试..."
+
+# 前端测试
+npm run test
+if [ $? -ne 0 ]; then
+  echo "pre-push: 前端测试失败，中止 push"
+  exit 1
+fi
+
+# Rust 测试
+cargo test --manifest-path src-tauri/Cargo.toml
+if [ $? -ne 0 ]; then
+  echo "pre-push: Rust 测试失败，中止 push"
+  exit 1
+fi
+
+echo "pre-push: 全部测试通过"
