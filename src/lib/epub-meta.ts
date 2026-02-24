@@ -1,4 +1,5 @@
 import { unzipSync } from "fflate";
+import { resolvePath } from "@/lib/parse-utils";
 
 export interface EpubMeta {
   title: string;
@@ -7,16 +8,6 @@ export interface EpubMeta {
 }
 
 const DC_NS = "http://purl.org/dc/elements/1.1/";
-
-function resolvePath(base: string, relative: string): string {
-  if (relative.startsWith("/")) return relative.slice(1);
-  const parts = base.substring(0, base.lastIndexOf("/") + 1).split("/");
-  for (const seg of relative.split("/")) {
-    if (seg === "..") parts.pop();
-    else if (seg !== ".") parts.push(seg);
-  }
-  return parts.filter(Boolean).join("/");
-}
 
 function bytesToDataUrl(bytes: Uint8Array, mediaType: string): string {
   const CHUNK = 0x8000;

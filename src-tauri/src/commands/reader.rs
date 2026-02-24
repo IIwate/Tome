@@ -156,3 +156,121 @@ pub fn read_txt_file(path: String) -> Result<TxtContent, String> {
         encoding,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detect_and_decode_utf8_bom() {
+        let mut bytes = vec![0xEF, 0xBB, 0xBF];
+        bytes.extend_from_slice("你好".as_bytes());
+
+        let (text, encoding) = detect_and_decode(&bytes);
+        assert!(text.contains("你好"));
+        assert_eq!(encoding, "UTF-8");
+    }
+
+    #[test]
+    fn detect_and_decode_pure_utf8() {
+        let input = "hello 世界";
+        let (text, encoding) = detect_and_decode(input.as_bytes());
+        assert_eq!(text, input);
+        assert_eq!(encoding, "UTF-8");
+    }
+
+    #[test]
+    fn detect_and_decode_gbk() {
+        let (gbk_bytes, _, had_errors) = encoding_rs::GBK.encode("你好，世界");
+        assert!(!had_errors);
+
+        let (text, encoding) = detect_and_decode(gbk_bytes.as_ref());
+        assert!(text.contains("你好"));
+        assert!(!encoding.is_empty());
+    }
+
+    #[test]
+    fn detect_and_decode_empty() {
+        let (text, encoding) = detect_and_decode(&[]);
+        assert_eq!(text, "");
+        assert_eq!(encoding, "UTF-8");
+    }
+
+    #[test]
+    fn split_chapters_chinese() {
+        let text = "第一章 开始\n内容\n第二章 结束";
+        let chapters = split_chapters(text, "回退标题");
+
+        assert_eq!(chapters.len(), 2);
+        assert_eq!(chapters[0].title, "第一章 开始");
+        assert_eq!(chapters[1].title, "第二章 结束");
+        assert!(chapters[0].start_offset < chapters[1].start_offset);
+    }
+
+    #[test]
+    fn split_chapters_english() {
+        let text = "Chapter 1 Begin\ntext\nChapter 2 End";
+        let chapters = split_chapters(text, "fallback");
+
+        assert_eq!(chapters.len(), 2);
+        assert_eq!(chapters[0].title, "Chapter 1 Begin");
+        assert_eq!(chapters[1].title, "Chapter 2 End");
+    }
+
+    #[test]
+    fn split_chapters_volume() {
+        let text = "卷一 起源\n...\n卷二 发展";
+        let chapters = split_chapters(text, "fallback");
+
+        assert_eq!(chapters.len(), 2);
+        assert_eq!(chapters[0].title, "卷一 起源");
+        assert_eq!(chapters[1].title, "卷二 发展");
+    }
+
+    #[test]
+    fn split_chapters_fallback() {
+        let text = "这是一段没有章节标记的正文。";
+        let chapters = split_chapters(text, "默认标题");
+
+        assert_eq!(chapters.len(), 1);
+        assert_eq!(chapters[0].title, "默认标题");
+        assert_eq!(chapters[0].start_offset, 0);
+    }
+
+    #[test]
+    fn split_chapters_utf16_offsets_with_emoji() {
+        let text = "第一章 你好🌍\n第二章 世界";
+        let chapters = split_chapters(text, "fallback");
+
+        assert_eq!(chapters.len(), 2);
+        let second_byte_offset = text.find("第二章").expect("应找到第二章");
+        let expected_u16 = text[..second_byte_offset].encode_utf16().count();
+        assert_eq!(chapters[1].start_offset, expected_u16);
+    }
+
+    #[test]
+    fn byte_to_utf16_map_ascii() {
+        let map = build_byte_to_utf16_map("abc");
+        assert_eq!(map[0], 0);
+        assert_eq!(map[1], 1);
+        assert_eq!(map[2], 2);
+        assert_eq!(map[3], 3);
+    }
+
+    #[test]
+    fn byte_to_utf16_map_cjk() {
+        let map = build_byte_to_utf16_map("你好");
+        assert_eq!(map[0], 0);
+        assert_eq!(map[3], 1);
+        assert_eq!(map[6], 2);
+    }
+
+    #[test]
+    fn byte_to_utf16_map_surrogate_pair() {
+        let map = build_byte_to_utf16_map("a𝄞b");
+        assert_eq!(map[0], 0);
+        assert_eq!(map[1], 1);
+        assert_eq!(map[5], 3);
+        assert_eq!(map[6], 4);
+    }
+}
