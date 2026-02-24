@@ -3,7 +3,7 @@
  * 调用 Rust read_txt_file 命令，转换返回的章节数据
  */
 
-import { invokeCommand } from "@/lib/tauri-bridge";
+import { invoke } from "@tauri-apps/api/core";
 
 export interface TxtChapter {
   title: string;
@@ -23,7 +23,7 @@ interface RustTxtContent {
 }
 
 export async function parseTxtFile(path: string): Promise<TxtContent> {
-  const raw = await invokeCommand<RustTxtContent>("read_txt_file", { path });
+  const raw = await invoke<RustTxtContent>("read_txt_file", { path });
   return {
     text: raw.text,
     chapters: raw.chapters.map((c) => ({

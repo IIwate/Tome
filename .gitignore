@@ -33,8 +33,3 @@ findings.json
 # Logs
 *.log
 npm-debug.log*
-
-# Test artifacts
-playwright-report/
-test-results/
-.husky/_/

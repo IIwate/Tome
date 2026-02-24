@@ -10,8 +10,6 @@ export function BookCard({ book, onClick }: BookCardProps) {
   return (
     <button
       onClick={onClick}
-      aria-label={`打开${book.title}`}
-      data-testid={`book-card-${book.id}`}
       className="group w-full text-left focus:outline-none"
     >
       <div

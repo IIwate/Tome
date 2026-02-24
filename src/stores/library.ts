@@ -1,9 +1,10 @@
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
+import { open } from "@tauri-apps/plugin-dialog";
+import { invoke } from "@tauri-apps/api/core";
 import { loadPersistedSettings, persistSettings } from "@/lib/tauri-store";
 import { extractEpubMeta } from "@/lib/epub-meta";
 import { generateTxtCover } from "@/lib/cover-gen";
-import { openDialog, invokeCommand } from "@/lib/tauri-bridge";
 
 export interface Book {
   id: string;
@@ -78,14 +79,14 @@ async function importSingleFile(
   const format: "epub" | "txt" = ext === "epub" ? "epub" : "txt";
 
   const size =
-    fileSize ?? (await invokeCommand<number>("stat_file", { path: filePath }));
+    fileSize ?? (await invoke<number>("stat_file", { path: filePath }));
 
   let title = filenameFromPath(filePath);
   let author = "";
   let coverDataUrl = "";
 
   if (format === "epub") {
-    const bytes = await invokeCommand<ArrayBuffer>("read_file_bytes", {
+    const bytes = await invoke<ArrayBuffer>("read_file_bytes", {
       path: filePath,
     });
     const meta = extractEpubMeta(new Uint8Array(bytes));
@@ -134,7 +135,7 @@ export const useLibraryStore = create<LibraryState & LibraryActions>()(
       set({ _importing: true });
 
       try {
-        const selected = await openDialog({
+        const selected = await open({
           multiple: true,
           filters: [{ name: "书籍", extensions: ["txt", "epub"] }],
         });
@@ -168,12 +169,12 @@ export const useLibraryStore = create<LibraryState & LibraryActions>()(
       set({ _importing: true });
 
       try {
-        const folder = await openDialog({ directory: true });
-        if (!folder || Array.isArray(folder)) return;
+        const folder = await open({ directory: true });
+        if (!folder) return;
 
         let scanned: ScannedBook[];
         try {
-          scanned = await invokeCommand<ScannedBook[]>("scan_books", {
+          scanned = await invoke<ScannedBook[]>("scan_books", {
             root: folder,
             extensions: ["txt", "epub"],
           });

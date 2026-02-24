@@ -13,10 +13,7 @@ export function ReadingProgressBar({ percent }: ReadingProgressBarProps) {
           style={{ width: `${clamped}%` }}
         />
       </div>
-      <span
-        data-testid="reading-progress-value"
-        className="min-w-[3ch] text-right text-xs tabular-nums text-muted-foreground"
-      >
+      <span className="min-w-[3ch] text-right text-xs tabular-nums text-muted-foreground">
         {clamped}%
       </span>
     </div>

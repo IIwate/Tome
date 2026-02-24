@@ -1,19 +1,12 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Minus, Square, X } from "lucide-react";
-import { useCallback, useState, useEffect, useMemo } from "react";
+import { useCallback, useState, useEffect } from "react";
 
 export function TitleBar() {
-  const appWindow = useMemo(() => {
-    try {
-      return getCurrentWindow();
-    } catch {
-      return null;
-    }
-  }, []);
+  const appWindow = getCurrentWindow();
   const [maximized, setMaximized] = useState(false);
 
   useEffect(() => {
-    if (!appWindow) return;
     // 初始化时获取当前最大化状态
     appWindow.isMaximized().then(setMaximized);
 
@@ -26,15 +19,15 @@ export function TitleBar() {
   }, [appWindow]);
 
   const handleMinimize = useCallback(() => {
-    appWindow?.minimize();
+    appWindow.minimize();
   }, [appWindow]);
 
   const handleToggleMaximize = useCallback(() => {
-    appWindow?.toggleMaximize();
+    appWindow.toggleMaximize();
   }, [appWindow]);
 
   const handleClose = useCallback(() => {
-    appWindow?.close();
+    appWindow.close();
   }, [appWindow]);
 
   return (
