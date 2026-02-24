@@ -5,9 +5,18 @@ import { BookPlus } from "lucide-react";
 interface BookGridProps {
   books: Book[];
   onBookClick: (book: Book) => void;
+  selectionMode: boolean;
+  selectedIds: Set<string>;
+  onToggleSelect: (id: string) => void;
 }
 
-export function BookGrid({ books, onBookClick }: BookGridProps) {
+export function BookGrid({
+  books,
+  onBookClick,
+  selectionMode,
+  selectedIds,
+  onToggleSelect,
+}: BookGridProps) {
   if (books.length === 0) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -29,7 +38,15 @@ export function BookGrid({ books, onBookClick }: BookGridProps) {
   return (
     <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-x-5 gap-y-6 p-6">
       {books.map((book) => (
-        <BookCard key={book.id} book={book} onClick={() => onBookClick(book)} />
+        <BookCard
+          key={book.id}
+          book={book}
+          selectionMode={selectionMode}
+          selected={selectedIds.has(book.id)}
+          onClick={
+            selectionMode ? () => onToggleSelect(book.id) : () => onBookClick(book)
+          }
+        />
       ))}
     </div>
   );

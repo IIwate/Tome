@@ -33,3 +33,6 @@ findings.json
 # Logs
 *.log
 npm-debug.log*
+
+# Intermediate docs (local only)
+docs/plans/

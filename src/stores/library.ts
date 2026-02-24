@@ -38,6 +38,7 @@ interface LibraryState {
 interface LibraryActions {
   addBook: (book: Book) => void;
   removeBook: (id: string) => void;
+  removeBooks: (ids: string[]) => void;
   updateBook: (id: string, updates: Partial<Book>) => void;
   importFiles: () => Promise<void>;
   scanFolder: () => Promise<void>;
@@ -58,14 +59,14 @@ function parseTxtFilename(raw: string): { title: string; author: string } {
   // 《书名》后跟可选分隔符和作者
   const m1 = raw.match(/^《(.+?)》[\s\-—·]*(.*)$/);
   if (m1) {
-    const title = m1[1].trim();
-    if (title) return { title, author: m1[2].trim() || "佚名" };
+    const title = m1[1]?.trim() ?? "";
+    if (title) return { title, author: m1[2]?.trim() || "佚名" };
   }
   // 书名 - 作者（要求分隔符两侧有空格，避免 Spider-Man 误拆）
   const m2 = raw.match(/^(.+?)\s+[-—]\s+(.+)$/);
   if (m2) {
-    const title = m2[1].trim();
-    if (title) return { title, author: m2[2].trim() || "佚名" };
+    const title = m2[1]?.trim() ?? "";
+    if (title) return { title, author: m2[2]?.trim() || "佚名" };
   }
   return { title: raw || "未知书名", author: "佚名" };
 }
@@ -124,6 +125,13 @@ export const useLibraryStore = create<LibraryState & LibraryActions>()(
 
     removeBook: (id) =>
       set((s) => ({ books: s.books.filter((b) => b.id !== id) })),
+
+    removeBooks: (ids) =>
+      set((s) => {
+        if (ids.length === 0) return {};
+        const idSet = new Set(ids);
+        return { books: s.books.filter((b) => !idSet.has(b.id)) };
+      }),
 
     updateBook: (id, updates) =>
       set((s) => ({

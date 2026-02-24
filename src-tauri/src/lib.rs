@@ -11,6 +11,7 @@ pub fn run() {
             commands::reader::read_file_bytes,
             commands::reader::read_txt_file,
             commands::reader::stat_file,
+            commands::reader::delete_book_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

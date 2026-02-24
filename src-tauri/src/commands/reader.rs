@@ -131,6 +131,12 @@ pub fn stat_file(path: String) -> Result<u64, String> {
 }
 
 #[tauri::command]
+pub fn delete_book_file(path: String) -> Result<(), String> {
+    let canonical = validate_book_path(&path)?;
+    std::fs::remove_file(&canonical).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn read_txt_file(path: String) -> Result<TxtContent, String> {
     let canonical = validate_book_path(&path)?;
     let bytes = std::fs::read(&canonical).map_err(|e| e.to_string())?;

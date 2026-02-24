@@ -4,6 +4,7 @@ import { shallow } from "zustand/shallow";
 import { loadPersistedSettings, persistSettings } from "@/lib/tauri-store";
 
 export type Theme = "light" | "dark" | "sepia";
+export type BookDeleteMode = "library-only" | "library-and-file";
 
 interface SettingsState {
   theme: Theme;
@@ -11,6 +12,8 @@ interface SettingsState {
   fontSize: number;
   lineHeight: number;
   margin: number;
+  bookDeleteSkipConfirm: boolean;
+  bookDeleteMode: BookDeleteMode;
   _hydrated: boolean;
 }
 
@@ -20,6 +23,8 @@ interface SettingsActions {
   setFontSize: (fontSize: number) => void;
   setLineHeight: (lineHeight: number) => void;
   setMargin: (margin: number) => void;
+  setBookDeleteSkipConfirm: (skip: boolean) => void;
+  setBookDeleteMode: (mode: BookDeleteMode) => void;
   hydrate: () => Promise<void>;
 }
 
@@ -29,6 +34,8 @@ const DEFAULTS: Omit<SettingsState, "_hydrated"> = {
   fontSize: 18,
   lineHeight: 1.8,
   margin: 60,
+  bookDeleteSkipConfirm: false,
+  bookDeleteMode: "library-only",
 };
 
 function applyTheme(theme: Theme) {
@@ -45,6 +52,8 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
     setFontSize: (fontSize) => set({ fontSize }),
     setLineHeight: (lineHeight) => set({ lineHeight }),
     setMargin: (margin) => set({ margin }),
+    setBookDeleteSkipConfirm: (skip) => set({ bookDeleteSkipConfirm: skip }),
+    setBookDeleteMode: (mode) => set({ bookDeleteMode: mode }),
 
     hydrate: async () => {
       const persisted = await loadPersistedSettings(DEFAULTS);
@@ -76,6 +85,8 @@ useSettingsStore.subscribe(
     fontSize: s.fontSize,
     lineHeight: s.lineHeight,
     margin: s.margin,
+    bookDeleteSkipConfirm: s.bookDeleteSkipConfirm,
+    bookDeleteMode: s.bookDeleteMode,
   }),
   (settings) => {
     if (!useSettingsStore.getState()._hydrated) return;

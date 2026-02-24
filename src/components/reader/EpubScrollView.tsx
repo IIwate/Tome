@@ -1,6 +1,5 @@
 import {
   forwardRef,
-  useCallback,
   useEffect,
   useImperativeHandle,
   useRef,
@@ -165,7 +164,7 @@ export const EpubScrollView = forwardRef<
   const sectionEls = useRef<Map<number, HTMLDivElement>>(new Map());
   const shadowRoots = useRef<Map<number, ShadowRoot>>(new Map());
   const linearIndices = useRef<number[]>([]);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onRelocateRef = useRef(onRelocate);
   onRelocateRef.current = onRelocate;
 
@@ -262,7 +261,7 @@ export const EpubScrollView = forwardRef<
         // 4. 过滤 linear sections
         const indices: number[] = [];
         for (let i = 0; i < book.sections.length; i++) {
-          if (book.sections[i].linear !== "no") indices.push(i);
+          if (book.sections[i]?.linear !== "no") indices.push(i);
         }
         linearIndices.current = indices;
 
@@ -276,7 +275,9 @@ export const EpubScrollView = forwardRef<
         for (let li = 0; li < indices.length; li++) {
           if (cancelled) return;
           const si = indices[li];
+          if (si == null) continue;
           const section = book.sections[si];
+          if (!section) continue;
 
           setLoadProgress(`加载章节 ${li + 1}/${indices.length}…`);
 
