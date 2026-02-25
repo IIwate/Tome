@@ -6,7 +6,8 @@ import { useSettingsStore, type BookDeleteMode } from "@/stores/settings";
 import { BookGrid } from "./BookGrid";
 import { ThemeSwitcher } from "@/components/layout/ThemeSwitcher";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
-import { Plus, FolderOpen, Search, CheckSquare, Trash2, X } from "lucide-react";
+import { Plus, FolderOpen, Search, CheckSquare, Trash2, X, Settings } from "lucide-react";
+import { AppSettingsPanel } from "./AppSettingsPanel";
 import type { Book } from "@/stores/library";
 
 interface LibraryPageProps {
@@ -34,6 +35,7 @@ export function LibraryPage({ onOpenBook }: LibraryPageProps) {
     useState<BookDeleteMode>("library-only");
   const [rememberDeleteChoice, setRememberDeleteChoice] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [feedback, setFeedback] = useState<{
     type: "success" | "warning";
     text: string;
@@ -286,6 +288,14 @@ export function LibraryPage({ onOpenBook }: LibraryPageProps) {
               </button>
             </>
           )}
+          <div className="h-5 w-px bg-border" />
+          <button
+            onClick={() => setSettingsOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <Settings className="h-3.5 w-3.5" />
+            设置
+          </button>
         </div>
       </div>
 
@@ -330,6 +340,11 @@ export function LibraryPage({ onOpenBook }: LibraryPageProps) {
         onRememberChange={setRememberDeleteChoice}
         onCancel={closeDeleteDialog}
         onConfirm={() => void executeDelete(pendingDeleteMode, rememberDeleteChoice)}
+      />
+
+      <AppSettingsPanel
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
       />
     </div>
   );
