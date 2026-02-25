@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { EpubScrollView, type EpubScrollViewHandle } from "./EpubScrollView";
 import { TxtReaderView, type TxtReaderViewHandle } from "./TxtReaderView";
 import { ControlOverlay } from "./ControlOverlay";
@@ -21,6 +21,32 @@ export function ReaderPage({ book, onBack }: ReaderPageProps) {
   const chapters = useReaderStore((s) => s.chapters);
   const percent = useReaderStore((s) => s.percent);
 
+  const lastBookProgressRef = useRef({
+    position: book.progress.position,
+    percent: book.progress.percent,
+  });
+  const bookProgressDirtyRef = useRef(false);
+
+  const flushBookProgress = useCallback(() => {
+    if (!bookProgressDirtyRef.current) return;
+    const p = lastBookProgressRef.current;
+    updateBook(book.id, {
+      progress: { position: p.position, percent: p.percent },
+    });
+    bookProgressDirtyRef.current = false;
+  }, [book.id, updateBook]);
+
+  useEffect(() => {
+    return () => {
+      flushBookProgress();
+    };
+  }, [flushBookProgress]);
+
+  const handleBack = useCallback(() => {
+    flushBookProgress();
+    onBack();
+  }, [flushBookProgress, onBack]);
+
   const [chapterNavOpen, setChapterNavOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -31,23 +57,31 @@ export function ReaderPage({ book, onBack }: ReaderPageProps) {
     (location: FoliateLocation) => {
       const pos = location.cfi ?? null;
       const pct = Math.round((location.fraction ?? 0) * 100);
-      updateBook(book.id, {
-        progress: { position: pos, percent: pct },
-      });
+      lastBookProgressRef.current = { position: pos, percent: pct };
+      if (
+        !bookProgressDirtyRef.current &&
+        (pos !== book.progress.position || pct !== book.progress.percent)
+      ) {
+        bookProgressDirtyRef.current = true;
+      }
       updateProgress(pos, pct);
     },
-    [book.id, updateBook, updateProgress]
+    [book.progress.percent, book.progress.position, updateProgress]
   );
 
   const handleTxtRelocate = useCallback(
     (charOffset: number, pct: number) => {
       const pos = charOffset.toString();
-      updateBook(book.id, {
-        progress: { position: pos, percent: pct },
-      });
+      lastBookProgressRef.current = { position: pos, percent: pct };
+      if (
+        !bookProgressDirtyRef.current &&
+        (pos !== book.progress.position || pct !== book.progress.percent)
+      ) {
+        bookProgressDirtyRef.current = true;
+      }
       updateProgress(pos, pct);
     },
-    [book.id, updateBook, updateProgress]
+    [book.progress.percent, book.progress.position, updateProgress]
   );
 
   const handleTocLoaded = useCallback(
@@ -110,7 +144,7 @@ export function ReaderPage({ book, onBack }: ReaderPageProps) {
         title={book.title}
         percent={percent}
         hasChapters={chapters.length > 0}
-        onBack={onBack}
+        onBack={handleBack}
         onOpenChapters={() => setChapterNavOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
       />

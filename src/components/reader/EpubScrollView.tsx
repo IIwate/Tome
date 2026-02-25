@@ -100,23 +100,6 @@ function injectHtmlIntoShadow(shadow: ShadowRoot, html: string): void {
   shadow.appendChild(wrapper);
 }
 
-/** 找到当前视口顶部可见的 section 索引 */
-function findVisibleSectionIndex(
-  container: HTMLElement,
-  sectionEls: Map<number, HTMLDivElement>
-): number {
-  const containerTop = container.getBoundingClientRect().top;
-  let visible = 0;
-  for (const [index, el] of sectionEls) {
-    const rect = el.getBoundingClientRect();
-    if (rect.bottom > containerTop + 1) {
-      visible = index;
-      break;
-    }
-  }
-  return visible;
-}
-
 /** 从 href 提取完整 fragment 并解码 */
 function extractFragment(href: string): string | undefined {
   const idx = href.indexOf("#");
@@ -164,7 +147,8 @@ export const EpubScrollView = forwardRef<
   const sectionEls = useRef<Map<number, HTMLDivElement>>(new Map());
   const shadowRoots = useRef<Map<number, ShadowRoot>>(new Map());
   const linearIndices = useRef<number[]>([]);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const progressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const progressPendingRef = useRef(false);
   const onRelocateRef = useRef(onRelocate);
   onRelocateRef.current = onRelocate;
 
@@ -401,44 +385,38 @@ export const EpubScrollView = forwardRef<
       const scrollPos = Math.min(scrollTop, effectiveMax);
       const fraction = effectiveMax > 0 ? scrollPos / effectiveMax : 0;
 
-      const sectionIndex = findVisibleSectionIndex(
-        container,
-        sectionEls.current
-      );
-
-      const position = `scroll:${sectionIndex}:${fraction.toFixed(6)}`;
-
-      // 尝试匹配当前章节的 TOC 项
-      const book = bookRef.current;
-      let tocItem: FoliateLocation["tocItem"];
-      if (book?.toc) {
-        const section = book.sections[sectionIndex];
-        if (section) {
-          const match = findTocItem(book.toc, section.id);
-          if (match) tocItem = match;
-        }
-      }
-
       onRelocateRef.current?.({
         fraction,
-        cfi: position,
-        tocItem,
-        index: sectionIndex,
+        // sectionIndex 当前未用于恢复，避免滚动中频繁 layout 测量；保留 3 段格式兼容旧数据
+        cfi: `scroll:0:${fraction.toFixed(6)}`,
       });
     };
 
-    const handleScroll = () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(flushProgress, 2000);
+    const requestFlush = () => {
+      if (progressTimerRef.current) {
+        progressPendingRef.current = true;
+        return;
+      }
+      flushProgress();
+      progressTimerRef.current = setTimeout(() => {
+        progressTimerRef.current = null;
+        if (progressPendingRef.current) {
+          progressPendingRef.current = false;
+          requestFlush();
+        }
+      }, 100);
     };
+
+    const handleScroll = () => requestFlush();
 
     container.addEventListener("scroll", handleScroll, { passive: true });
     return () => {
       container.removeEventListener("scroll", handleScroll);
-      if (debounceRef.current) {
-        clearTimeout(debounceRef.current);
-        flushProgress();
-      }
+      if (progressTimerRef.current) clearTimeout(progressTimerRef.current);
+      progressTimerRef.current = null;
+      progressPendingRef.current = false;
+      // 卸载时立即保存最后一次进度，避免节流窗口内丢失
+      flushProgress();
     };
   }, [loading]);
 
@@ -571,22 +549,3 @@ export const EpubScrollView = forwardRef<
   );
 });
 
-/* ---------- 辅助：在 TOC 树中查找匹配 section id 的项 ---------- */
-
-function findTocItem(
-  toc: FoliateTocItem[],
-  sectionId: string
-): { label: string; href: string } | undefined {
-  for (const item of toc) {
-    // TOC href 可能包含 fragment（如 "ch01.xhtml#sec1"），取路径部分比较
-    const hrefPath = item.href.split("#")[0];
-    if (sectionId === hrefPath || sectionId.endsWith("/" + hrefPath)) {
-      return { label: item.label, href: item.href };
-    }
-    if (item.subitems) {
-      const found = findTocItem(item.subitems, sectionId);
-      if (found) return found;
-    }
-  }
-  return undefined;
-}

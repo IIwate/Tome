@@ -80,7 +80,8 @@ export const TxtReaderView = forwardRef<TxtReaderViewHandle, TxtReaderViewProps>
     const contentRef = useRef<HTMLDivElement>(null);
     const [loading, setLoading] = useState(true);
     const [content, setContent] = useState<TxtContent | null>(null);
-    const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+    const progressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const progressPendingRef = useRef(false);
 
     const fontFamily = useSettingsStore((s) => s.fontFamily);
     const fontSize = useSettingsStore((s) => s.fontSize);
@@ -146,7 +147,7 @@ export const TxtReaderView = forwardRef<TxtReaderViewHandle, TxtReaderViewProps>
       });
     }, [content, lastPosition]);
 
-    // 滚动进度追踪（debounce 2s）
+    // 滚动进度追踪（节流 100ms，滚动中实时更新进度条）
     const onRelocateRef = useRef(onRelocate);
     onRelocateRef.current = onRelocate;
 
@@ -167,19 +168,31 @@ export const TxtReaderView = forwardRef<TxtReaderViewHandle, TxtReaderViewProps>
         onRelocateRef.current?.(charOffset, percent);
       };
 
-      const handleScroll = () => {
-        if (debounceRef.current) clearTimeout(debounceRef.current);
-        debounceRef.current = setTimeout(flushProgress, 2000);
+      const requestFlush = () => {
+        if (progressTimerRef.current) {
+          progressPendingRef.current = true;
+          return;
+        }
+        flushProgress();
+        progressTimerRef.current = setTimeout(() => {
+          progressTimerRef.current = null;
+          if (progressPendingRef.current) {
+            progressPendingRef.current = false;
+            requestFlush();
+          }
+        }, 100);
       };
+
+      const handleScroll = () => requestFlush();
 
       container.addEventListener("scroll", handleScroll, { passive: true });
       return () => {
         container.removeEventListener("scroll", handleScroll);
-        // 卸载时立即保存最后一次进度，避免 2s 窗口内丢失
-        if (debounceRef.current) {
-          clearTimeout(debounceRef.current);
-          flushProgress();
-        }
+        // 卸载时立即保存最后一次进度，避免节流窗口内丢失
+        if (progressTimerRef.current) clearTimeout(progressTimerRef.current);
+        progressTimerRef.current = null;
+        progressPendingRef.current = false;
+        flushProgress();
       };
     }, [content]);
 
