@@ -12,6 +12,9 @@ pub fn run() {
             commands::reader::read_txt_file,
             commands::reader::stat_file,
             commands::reader::delete_book_file,
+            commands::pdf::extract_pdf_meta,
+            commands::pdf::get_pdf_info,
+            commands::pdf::render_pdf_page,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

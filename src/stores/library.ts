@@ -4,6 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { loadPersistedSettings, persistSettings } from "@/lib/tauri-store";
 import { extractEpubMeta } from "@/lib/epub-meta";
+import { extractPdfMeta } from "@/lib/pdf-meta";
 import { generateTxtCover } from "@/lib/cover-gen";
 import {
   normalizePath,
@@ -14,7 +15,7 @@ import {
 export interface Book {
   id: string;
   path: string;
-  format: "epub" | "txt";
+  format: "epub" | "txt" | "pdf";
   title: string;
   author: string;
   coverDataUrl: string;
@@ -56,7 +57,8 @@ async function importSingleFile(
   fileSize?: number
 ): Promise<Book> {
   const ext = filePath.toLowerCase().split(".").pop();
-  const format: "epub" | "txt" = ext === "epub" ? "epub" : "txt";
+  const format: Book["format"] =
+    ext === "epub" ? "epub" : ext === "pdf" ? "pdf" : "txt";
 
   const size =
     fileSize ?? (await invoke<number>("stat_file", { path: filePath }));
@@ -73,6 +75,11 @@ async function importSingleFile(
     title = meta.title;
     author = meta.author;
     coverDataUrl = meta.coverDataUrl;
+  } else if (format === "pdf") {
+    const meta = await extractPdfMeta(filePath);
+    title = meta.title;
+    author = meta.author;
+    coverDataUrl = meta.coverDataUrl || generateTxtCover(title);
   } else {
     const parsed = parseTxtFilename(title);
     title = parsed.title;
@@ -124,7 +131,7 @@ export const useLibraryStore = create<LibraryState & LibraryActions>()(
       try {
         const selected = await open({
           multiple: true,
-          filters: [{ name: "书籍", extensions: ["txt", "epub"] }],
+          filters: [{ name: "书籍", extensions: ["txt", "epub", "pdf"] }],
         });
         if (!selected) return;
 
@@ -163,7 +170,7 @@ export const useLibraryStore = create<LibraryState & LibraryActions>()(
         try {
           scanned = await invoke<ScannedBook[]>("scan_books", {
             root: folder,
-            extensions: ["txt", "epub"],
+            extensions: ["txt", "epub", "pdf"],
           });
         } catch (e) {
           console.error("扫描目录失败:", e);

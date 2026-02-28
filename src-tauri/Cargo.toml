@@ -21,3 +21,6 @@ walkdir = "2"
 chardetng = "0.1"
 encoding_rs = "0.8"
 regex = "1"
+pdfium-render = { version = "0.8", features = ["sync"] }
+image = "0.25"
+base64 = "0.22"

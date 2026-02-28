@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { EpubScrollView, type EpubScrollViewHandle } from "./EpubScrollView";
 import { TxtReaderView, type TxtReaderViewHandle } from "./TxtReaderView";
+import { PdfReaderView, type PdfReaderViewHandle } from "./PdfReaderView";
 import { ControlOverlay } from "./ControlOverlay";
 import { ChapterNav } from "./ChapterNav";
 import { SettingsPanel } from "./SettingsPanel";
@@ -52,6 +53,7 @@ export function ReaderPage({ book, onBack }: ReaderPageProps) {
 
   const readerRef = useRef<EpubScrollViewHandle>(null);
   const txtReaderRef = useRef<TxtReaderViewHandle>(null);
+  const pdfReaderRef = useRef<PdfReaderViewHandle>(null);
 
   const handleRelocate = useCallback(
     (location: FoliateLocation) => {
@@ -72,6 +74,21 @@ export function ReaderPage({ book, onBack }: ReaderPageProps) {
   const handleTxtRelocate = useCallback(
     (charOffset: number, pct: number) => {
       const pos = charOffset.toString();
+      lastBookProgressRef.current = { position: pos, percent: pct };
+      if (
+        !bookProgressDirtyRef.current &&
+        (pos !== book.progress.position || pct !== book.progress.percent)
+      ) {
+        bookProgressDirtyRef.current = true;
+      }
+      updateProgress(pos, pct);
+    },
+    [book.progress.percent, book.progress.position, updateProgress]
+  );
+
+  const handlePdfRelocate = useCallback(
+    (position: string, pct: number) => {
+      const pos = position ?? null;
       lastBookProgressRef.current = { position: pos, percent: pct };
       if (
         !bookProgressDirtyRef.current &&
@@ -109,6 +126,9 @@ export function ReaderPage({ book, onBack }: ReaderPageProps) {
       if (book.format === "txt") {
         const offset = parseInt(href, 10);
         if (!isNaN(offset)) txtReaderRef.current?.scrollToOffset(offset);
+      } else if (book.format === "pdf") {
+        const pageIndex = parseInt(href, 10);
+        if (!isNaN(pageIndex)) pdfReaderRef.current?.goToPage(pageIndex);
       } else {
         await readerRef.current?.goTo(href);
       }
@@ -126,6 +146,15 @@ export function ReaderPage({ book, onBack }: ReaderPageProps) {
           lastPosition={book.progress.position}
           onRelocate={handleRelocate}
           onTocLoaded={handleTocLoaded}
+          onError={(err) => console.error("阅读器错误:", err.message)}
+        />
+      ) : book.format === "pdf" ? (
+        <PdfReaderView
+          ref={pdfReaderRef}
+          filePath={book.path}
+          lastPosition={book.progress.position}
+          onRelocate={handlePdfRelocate}
+          onChaptersLoaded={handleTocLoaded}
           onError={(err) => console.error("阅读器错误:", err.message)}
         />
       ) : (

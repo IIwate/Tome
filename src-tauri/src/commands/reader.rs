@@ -3,10 +3,10 @@ use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::LazyLock;
 
-const ALLOWED_EXTENSIONS: &[&str] = &["txt", "epub"];
+const ALLOWED_EXTENSIONS: &[&str] = &["txt", "epub", "pdf"];
 
 /// 校验文件路径：规范化 + 扩展名白名单
-fn validate_book_path(path: &str) -> Result<PathBuf, String> {
+pub(crate) fn validate_book_path(path: &str) -> Result<PathBuf, String> {
     let canonical = std::path::Path::new(path)
         .canonicalize()
         .map_err(|e| format!("路径无效: {e}"))?;
