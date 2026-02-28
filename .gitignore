@@ -35,4 +35,4 @@ findings.json
 npm-debug.log*
 
 # Intermediate docs (local only)
-docs/plans/
+docs/
