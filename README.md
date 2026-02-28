@@ -16,5 +16,6 @@
 
 ### 许可提示（非法律意见）
 
-仓库根目录的 `LICENSE`（如有）通常用于声明**本项目**的许可；而 `pdfium.dll` 属于第三方组件，随应用分发时一般需要一并提供其对应的许可文本/声明（具体以该组件发布包内的 LICENSE 与 licenses/ 目录为准）。
+仓库根目录的 `LICENSE`（如有）通常用于声明**本项目**的许可；而 `pdfium.dll` 属于第三方组件，随应用分发时一般需要一并提供其对应的许可文本/声明。
 
+本仓库已将 `pdfium-win-x64` 发布包内的许可文件收录在 `licenses/pdfium/`（含 `third_party/`），并在 `src-tauri/tauri.conf.json` 的 `bundle.resources` 中加入了 `../licenses` 以便打包时一并带上。

@@ -33,7 +33,8 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "resources"
+      "resources",
+      "../licenses"
     ],
     "windows": {
       "nsis": {
