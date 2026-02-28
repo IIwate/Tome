@@ -17,6 +17,7 @@ import {
   type FoliateTocItem,
 } from "@/lib/foliate";
 import { useSettingsStore } from "@/stores/settings";
+import { logError, logInfo } from "@/lib/logger";
 
 interface ReaderViewProps {
   /** EPUB 文件绝对路径 */
@@ -43,6 +44,18 @@ function getCssColor(varName: string): string {
     .getPropertyValue(varName)
     .trim();
   return raw ? `hsl(${raw})` : "";
+}
+
+const SOURCE = "reader/ReaderView";
+
+function countTocItems(items: FoliateTocItem[] | undefined): number {
+  if (!items || items.length === 0) return 0;
+  let count = 0;
+  for (const item of items) {
+    count += 1;
+    if (item.subitems) count += countTocItems(item.subitems);
+  }
+  return count;
 }
 
 export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
@@ -90,21 +103,21 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
           try {
             await viewRef.current?.goTo(target);
           } catch (err) {
-            console.error("章节跳转失败:", err);
+            logError(SOURCE, "章节跳转失败", err);
           }
         },
         next: async () => {
           try {
             await viewRef.current?.next();
           } catch (err) {
-            console.error("下一章失败:", err);
+            logError(SOURCE, "下一章失败", err);
           }
         },
         prev: async () => {
           try {
             await viewRef.current?.prev();
           } catch (err) {
-            console.error("上一章失败:", err);
+            logError(SOURCE, "上一章失败", err);
           }
         },
       }),
@@ -152,6 +165,11 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
 
           if (cancelled) return;
 
+          logInfo(SOURCE, "EPUB 加载成功", {
+            chapterCount: view.book?.sections?.length ?? 0,
+            tocCount: countTocItems(view.book?.toc),
+          });
+
           // 通知 TOC 加载完成
           if (view.book?.toc) {
             onTocLoaded?.(view.book.toc);
@@ -159,7 +177,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         } catch (err) {
           if (!cancelled) {
             const msg = err instanceof Error ? err.message : String(err);
-            console.error("EPUB 加载失败:", msg);
+            logError(SOURCE, "EPUB 加载失败", err);
             setError(msg);
             onError?.(err instanceof Error ? err : new Error(msg));
           }

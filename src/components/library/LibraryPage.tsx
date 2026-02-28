@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { cn } from "@/lib/utils";
+import { logError } from "@/lib/logger";
 import { useLibraryStore } from "@/stores/library";
 import { useSettingsStore, type BookDeleteMode } from "@/stores/settings";
 import { BookGrid } from "./BookGrid";
@@ -9,6 +10,8 @@ import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 import { Plus, FolderOpen, Search, CheckSquare, Trash2, X, Settings } from "lucide-react";
 import { AppSettingsPanel } from "./AppSettingsPanel";
 import type { Book } from "@/stores/library";
+
+const SOURCE = "library/LibraryPage";
 
 interface LibraryPageProps {
   onOpenBook: (book: Book) => void;
@@ -168,7 +171,7 @@ export function LibraryPage({ onOpenBook }: LibraryPageProps) {
             await invoke<void>("delete_book_file", { path: book.path });
             return { book, ok: true as const };
           } catch (error) {
-            console.error(`删除源文件失败: ${book.path}`, error);
+            logError(SOURCE, `删除源文件失败: ${book.path}`, error);
             return { book, ok: false as const };
           }
         })

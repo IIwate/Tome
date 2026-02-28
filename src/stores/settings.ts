@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 import { shallow } from "zustand/shallow";
 import { loadPersistedSettings, persistSettings } from "@/lib/tauri-store";
+import { logger } from "@/lib/logger";
 
 export type Theme = "light" | "dark" | "sepia";
 export type BookDeleteMode = "library-only" | "library-and-file";
@@ -14,6 +15,7 @@ interface SettingsState {
   margin: number;
   bookDeleteSkipConfirm: boolean;
   bookDeleteMode: BookDeleteMode;
+  debugMode: boolean;
   _hydrated: boolean;
 }
 
@@ -25,6 +27,7 @@ interface SettingsActions {
   setMargin: (margin: number) => void;
   setBookDeleteSkipConfirm: (skip: boolean) => void;
   setBookDeleteMode: (mode: BookDeleteMode) => void;
+  setDebugMode: (debugMode: boolean) => void;
   hydrate: () => Promise<void>;
 }
 
@@ -36,6 +39,7 @@ const DEFAULTS: Omit<SettingsState, "_hydrated"> = {
   margin: 60,
   bookDeleteSkipConfirm: false,
   bookDeleteMode: "library-only",
+  debugMode: false,
 };
 
 function applyTheme(theme: Theme) {
@@ -54,6 +58,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
     setMargin: (margin) => set({ margin }),
     setBookDeleteSkipConfirm: (skip) => set({ bookDeleteSkipConfirm: skip }),
     setBookDeleteMode: (mode) => set({ bookDeleteMode: mode }),
+    setDebugMode: (debugMode) => set({ debugMode }),
 
     hydrate: async () => {
       const persisted = await loadPersistedSettings(DEFAULTS);
@@ -75,6 +80,14 @@ useSettingsStore.subscribe(
   }
 );
 
+// 调试模式变更时启用/关闭内存日志采集
+useSettingsStore.subscribe(
+  (s) => s.debugMode,
+  (debugMode) => {
+    logger.setEnabled(debugMode);
+  }
+);
+
 // 设置变更时自动持久化（shallow 比较避免无变更触发）
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -87,6 +100,7 @@ useSettingsStore.subscribe(
     margin: s.margin,
     bookDeleteSkipConfirm: s.bookDeleteSkipConfirm,
     bookDeleteMode: s.bookDeleteMode,
+    debugMode: s.debugMode,
   }),
   (settings) => {
     if (!useSettingsStore.getState()._hydrated) return;

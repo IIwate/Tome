@@ -9,6 +9,7 @@ import {
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { FoliateTocItem } from "@/lib/foliate";
+import { logInfo } from "@/lib/logger";
 
 interface PdfReaderViewProps {
   filePath: string;
@@ -78,6 +79,8 @@ function parseLastPosition(lastPosition: string | null | undefined): number | nu
   const n = Number(m[1]);
   return Number.isFinite(n) ? Math.floor(n) : null;
 }
+
+const SOURCE = "reader/PdfReaderView";
 
 interface PdfPageItemProps {
   pageIndex: number;
@@ -378,6 +381,7 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
             .map(bookmarkToTocItem)
             .filter((x): x is FoliateTocItem => !!x);
           onChaptersLoaded?.(toc);
+          logInfo(SOURCE, "PDF 加载成功", { pageCount: pc });
         } catch (err) {
           if (cancelled) return;
           const msg = err instanceof Error ? err.message : String(err);
@@ -634,4 +638,3 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
     );
   }
 );
-

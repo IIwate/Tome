@@ -8,6 +8,7 @@ import {
 } from "react";
 import { parseTxtFile, type TxtChapter, type TxtContent } from "@/lib/txt-parser";
 import { useSettingsStore } from "@/stores/settings";
+import { logError, logInfo } from "@/lib/logger";
 
 interface TxtReaderViewProps {
   filePath: string;
@@ -26,6 +27,8 @@ interface TextSegment {
   title: string;
   text: string;
 }
+
+const SOURCE = "reader/TxtReaderView";
 
 function buildSegments(content: TxtContent): TextSegment[] {
   const { text, chapters } = content;
@@ -114,9 +117,13 @@ export const TxtReaderView = forwardRef<TxtReaderViewHandle, TxtReaderViewProps>
           if (cancelled) return;
           setContent(result);
           onChaptersLoaded?.(result.chapters);
+          logInfo(SOURCE, "TXT 加载成功", {
+            encoding: result.encoding,
+            chapterCount: result.chapters.length,
+          });
         } catch (err) {
           if (!cancelled) {
-            console.error("TXT 加载失败:", err);
+            logError(SOURCE, "TXT 加载失败", err);
             onError?.(err instanceof Error ? err : new Error(String(err)));
           }
         } finally {

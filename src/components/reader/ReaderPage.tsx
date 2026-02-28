@@ -7,6 +7,7 @@ import { ChapterNav } from "./ChapterNav";
 import { SettingsPanel } from "./SettingsPanel";
 import { useLibraryStore, type Book } from "@/stores/library";
 import { useReaderStore } from "@/stores/reader";
+import { logError } from "@/lib/logger";
 import type { FoliateLocation, FoliateTocItem } from "@/lib/foliate";
 import type { TxtChapter } from "@/lib/txt-parser";
 
@@ -14,6 +15,8 @@ interface ReaderPageProps {
   book: Book;
   onBack: () => void;
 }
+
+const SOURCE = "reader/ReaderPage";
 
 export function ReaderPage({ book, onBack }: ReaderPageProps) {
   const updateBook = useLibraryStore((s) => s.updateBook);
@@ -146,7 +149,7 @@ export function ReaderPage({ book, onBack }: ReaderPageProps) {
           lastPosition={book.progress.position}
           onRelocate={handleRelocate}
           onTocLoaded={handleTocLoaded}
-          onError={(err) => console.error("阅读器错误:", err.message)}
+          onError={(err) => logError(SOURCE, "阅读器错误", err)}
         />
       ) : book.format === "pdf" ? (
         <PdfReaderView
@@ -155,7 +158,7 @@ export function ReaderPage({ book, onBack }: ReaderPageProps) {
           lastPosition={book.progress.position}
           onRelocate={handlePdfRelocate}
           onChaptersLoaded={handleTocLoaded}
-          onError={(err) => console.error("阅读器错误:", err.message)}
+          onError={(err) => logError(SOURCE, "阅读器错误", err)}
         />
       ) : (
         <TxtReaderView
@@ -164,7 +167,7 @@ export function ReaderPage({ book, onBack }: ReaderPageProps) {
           lastPosition={book.progress.position}
           onRelocate={handleTxtRelocate}
           onChaptersLoaded={handleTxtChaptersLoaded}
-          onError={(err) => console.error("阅读器错误:", err.message)}
+          onError={(err) => logError(SOURCE, "阅读器错误", err)}
         />
       )}
 

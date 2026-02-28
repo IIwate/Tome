@@ -15,6 +15,7 @@ import {
   type FoliateTocItem,
 } from "@/lib/foliate";
 import { useSettingsStore } from "@/stores/settings";
+import { logError, logInfo } from "@/lib/logger";
 
 /* ---------- 类型 ---------- */
 
@@ -31,6 +32,8 @@ export interface EpubScrollViewHandle {
   next: () => Promise<void>;
   prev: () => Promise<void>;
 }
+
+const SOURCE = "reader/EpubScrollView";
 
 /* ---------- 工具函数 ---------- */
 
@@ -311,11 +314,12 @@ export const EpubScrollView = forwardRef<
         // 旧 CFI 格式：尝试定位到对应章节
         // （精确位置无法恢复，只能定位到章节级别）
 
+        logInfo(SOURCE, "EPUB 加载成功", { chapterCount: indices.length });
         setLoading(false);
       } catch (err) {
         if (!cancelled) {
           const msg = err instanceof Error ? err.message : String(err);
-          console.error("EPUB 加载失败:", msg);
+          logError(SOURCE, "EPUB 加载失败", err);
           setError(msg);
           onError?.(err instanceof Error ? err : new Error(msg));
           setLoading(false);
@@ -548,4 +552,3 @@ export const EpubScrollView = forwardRef<
     </div>
   );
 });
-

@@ -1,6 +1,8 @@
-import { useEffect } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { useSettingsStore, type BookDeleteMode } from "@/stores/settings";
 import { cn } from "@/lib/utils";
+import { logger } from "@/lib/logger";
+import { DebugLogDialog } from "./DebugLogDialog";
 import { X, Trash2, FileX2 } from "lucide-react";
 
 interface AppSettingsPanelProps {
@@ -99,6 +101,7 @@ export function AppSettingsPanel({ open, onClose }: AppSettingsPanelProps) {
     (s) => s.bookDeleteSkipConfirm
   );
   const bookDeleteMode = useSettingsStore((s) => s.bookDeleteMode);
+  const debugMode = useSettingsStore((s) => s.debugMode);
 
   const setFontFamily = useSettingsStore((s) => s.setFontFamily);
   const setFontSize = useSettingsStore((s) => s.setFontSize);
@@ -108,16 +111,40 @@ export function AppSettingsPanel({ open, onClose }: AppSettingsPanelProps) {
     (s) => s.setBookDeleteSkipConfirm
   );
   const setBookDeleteMode = useSettingsStore((s) => s.setBookDeleteMode);
+  const setDebugMode = useSettingsStore((s) => s.setDebugMode);
 
-  // Esc 关闭
+  const [logDialogOpen, setLogDialogOpen] = useState(false);
+  const logEntries = useSyncExternalStore(
+    logger.subscribe,
+    logger.getEntries,
+    logger.getEntries
+  );
+  const logEntryCount = logEntries.length;
+
+  useEffect(() => {
+    if (!open) setLogDialogOpen(false);
+  }, [open]);
+
+  useEffect(() => {
+    if (!debugMode) {
+      setLogDialogOpen(false);
+    }
+  }, [debugMode]);
+
+  // Esc 关闭：优先关闭日志弹窗
   useEffect(() => {
     if (!open) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      if (logDialogOpen) {
+        setLogDialogOpen(false);
+        return;
+      }
+      onClose();
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [open, onClose]);
+  }, [open, logDialogOpen, onClose]);
 
   if (!open) return null;
 
@@ -254,8 +281,43 @@ export function AppSettingsPanel({ open, onClose }: AppSettingsPanelProps) {
               删除时不再询问确认
             </label>
           </div>
+
+          {/* 高级 */}
+          <div className="space-y-2">
+            <span className="text-xs font-medium text-foreground">高级</span>
+
+            <div className="space-y-1">
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground/80">
+                <input
+                  type="checkbox"
+                  checked={debugMode}
+                  onChange={(e) => setDebugMode(e.target.checked)}
+                  className="h-3.5 w-3.5 rounded border-border"
+                />
+                调试模式
+              </label>
+              <p className="text-[11px] text-muted-foreground">
+                开启后会记录内存日志，便于排查问题。
+              </p>
+            </div>
+
+            {debugMode && (
+              <button
+                type="button"
+                onClick={() => setLogDialogOpen(true)}
+                className="inline-flex w-full items-center justify-center rounded-lg border border-border/60 bg-background px-3 py-2 text-xs font-medium text-foreground/80 transition-colors hover:bg-accent/60"
+              >
+                查看日志 ({logEntryCount})
+              </button>
+            )}
+          </div>
         </div>
       </div>
+
+      <DebugLogDialog
+        open={logDialogOpen}
+        onClose={() => setLogDialogOpen(false)}
+      />
     </>
   );
 }

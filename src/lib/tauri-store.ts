@@ -1,4 +1,7 @@
 import { LazyStore } from "@tauri-apps/plugin-store";
+import { logError } from "@/lib/logger";
+
+const SOURCE = "lib/tauri-store";
 
 const stores = new Map<string, LazyStore>();
 
@@ -41,6 +44,6 @@ export async function persistSettings(
     }
     await store.save();
   } catch (e) {
-    console.error("Failed to persist settings:", e);
+    logError(SOURCE, "设置持久化失败", e);
   }
 }

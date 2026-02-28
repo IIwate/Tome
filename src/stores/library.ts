@@ -11,6 +11,9 @@ import {
   filenameFromPath,
   parseTxtFilename,
 } from "@/lib/parse-utils";
+import { logError, logInfo } from "@/lib/logger";
+
+const SOURCE = "stores/library";
 
 export interface Book {
   id: string;
@@ -146,13 +149,14 @@ export const useLibraryStore = create<LibraryState & LibraryActions>()(
             imported.push(book);
             existingPaths.add(normalizePath(filePath));
           } catch (e) {
-            console.error(`导入失败: ${filePath}`, e);
+            logError(SOURCE, `导入失败: ${filePath}`, e);
           }
         }
 
         if (imported.length > 0) {
           set((s) => ({ books: [...s.books, ...imported] }));
         }
+        logInfo(SOURCE, "导入完成", { imported: imported.length });
       } finally {
         set({ _importing: false });
       }
@@ -173,11 +177,14 @@ export const useLibraryStore = create<LibraryState & LibraryActions>()(
             extensions: ["txt", "epub", "pdf"],
           });
         } catch (e) {
-          console.error("扫描目录失败:", e);
+          logError(SOURCE, "扫描目录失败", e);
           return;
         }
 
-        if (scanned.length === 0) return;
+        if (scanned.length === 0) {
+          logInfo(SOURCE, "扫描完成", { scanned: 0, imported: 0 });
+          return;
+        }
 
         const existingPaths = new Set(get().books.map((b) => normalizePath(b.path)));
         const imported: Book[] = [];
@@ -189,13 +196,14 @@ export const useLibraryStore = create<LibraryState & LibraryActions>()(
             imported.push(book);
             existingPaths.add(normalizePath(item.path));
           } catch (e) {
-            console.error(`导入失败: ${item.path}`, e);
+            logError(SOURCE, `扫描导入失败: ${item.path}`, e);
           }
         }
 
         if (imported.length > 0) {
           set((s) => ({ books: [...s.books, ...imported] }));
         }
+        logInfo(SOURCE, "扫描完成", { scanned: scanned.length, imported: imported.length });
       } finally {
         set({ _importing: false });
       }
