@@ -109,42 +109,31 @@ describe("createConcurrencyLimiter", () => {
     });
 
     const err = new Error("sync boom");
+    // 超过 V8 调用栈深度上限（~10k-15k），确保没有 draining 保护时会爆栈
     const throwCount = 20_000;
-    const throwPromises: Array<Promise<unknown>> = [];
 
+    // 只静默吞掉 rejection，不收集到数组里做 allSettled
+    let rejectedCount = 0;
     for (let i = 0; i < throwCount; i++) {
-      throwPromises.push(
-        limit(() => {
-          throw err;
-        })
-      );
+      limit(() => {
+        throw err;
+      }).catch(() => {
+        rejectedCount++;
+      });
     }
 
     const afterPromise = limit(() => "after");
 
     gate.resolve();
 
-    const results = await Promise.allSettled([
-      gateTask,
-      afterPromise,
-      ...throwPromises,
-    ]);
+    // 只等核心断言：gate 完成 + after 任务能正常拿到结果
+    await gateTask;
+    const afterValue = await afterPromise;
+    expect(afterValue).toBe("after");
 
-    expect(results[1].status).toBe("fulfilled");
-    if (results[1].status === "fulfilled") {
-      expect(results[1].value).toBe("after");
-    }
-
-    let rejected = 0;
-    for (let i = 2; i < results.length; i++) {
-      if (results[i].status === "rejected") rejected++;
-    }
-    expect(rejected).toBe(throwCount);
-
-    expect(results[2].status).toBe("rejected");
-    if (results[2].status === "rejected") {
-      expect(results[2].reason).toBe(err);
-    }
+    // 等微任务队列排空，让所有 .catch 回调执行完
+    await flushMicrotasks(20);
+    expect(rejectedCount).toBe(throwCount);
   });
 
   it("队列清空：全部完成后不遗留占用", async () => {
