@@ -2,7 +2,8 @@ use base64::{engine::general_purpose, Engine as _};
 use pdfium_render::prelude::*;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, LazyLock, Mutex};
 
 use super::reader::validate_book_path;
 
@@ -32,6 +33,28 @@ const JPEG_QUALITY_COVER: u8 = 85;
 const JPEG_QUALITY_PAGE: u8 = 70;
 
 static PDFIUM: LazyLock<Result<Pdfium, String>> = LazyLock::new(init_pdfium_inner);
+
+struct CachedDoc {
+    path: PathBuf,
+    document: Arc<Mutex<PdfDocument<'static>>>,
+}
+
+static DOC_CACHE: LazyLock<Mutex<Option<CachedDoc>>> = LazyLock::new(|| Mutex::new(None));
+static DOC_OPEN_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+pub fn pdf_debug_open_count() -> usize {
+    DOC_OPEN_COUNT.load(Ordering::Relaxed)
+}
+
+pub fn pdf_debug_reset_open_count() {
+    DOC_OPEN_COUNT.store(0, Ordering::Relaxed);
+}
+
+pub fn pdf_debug_clear_doc_cache() {
+    if let Ok(mut cache) = DOC_CACHE.lock() {
+        *cache = None;
+    }
+}
 
 fn get_pdfium() -> Result<&'static Pdfium, String> {
     match &*PDFIUM {
@@ -95,12 +118,52 @@ fn load_document<'a>(pdfium: &'a Pdfium, path: &Path) -> Result<PdfDocument<'a>,
         .map_err(|e| format!("打开 PDF 失败: {e}"))
 }
 
-fn render_page_to_jpeg_data_url(
+fn with_cached_document<T, F>(path: &Path, f: F) -> Result<T, String>
+where
+    F: FnOnce(&PdfDocument) -> Result<T, String>,
+{
+    let document = {
+        let cache = DOC_CACHE
+            .lock()
+            .map_err(|_| "DOC_CACHE 锁已被毒化".to_string())?;
+
+        if let Some(cached) = cache.as_ref().filter(|cached| cached.path.as_path() == path) {
+            cached.document.clone()
+        } else {
+            drop(cache);
+
+            let pdfium = get_pdfium()?;
+            let document = Arc::new(Mutex::new(load_document(pdfium, path)?));
+
+            let mut cache = DOC_CACHE
+                .lock()
+                .map_err(|_| "DOC_CACHE 锁已被毒化".to_string())?;
+
+            if let Some(cached) = cache.as_ref().filter(|cached| cached.path.as_path() == path) {
+                cached.document.clone()
+            } else {
+                DOC_OPEN_COUNT.fetch_add(1, Ordering::Relaxed);
+                *cache = Some(CachedDoc {
+                    path: path.to_path_buf(),
+                    document: document.clone(),
+                });
+                document
+            }
+        }
+    };
+
+    let document = document
+        .lock()
+        .map_err(|_| "PDF 文档锁已被毒化".to_string())?;
+
+    f(&document)
+}
+
+fn render_page_to_rgb_image(
     document: &PdfDocument,
     page_index: u32,
     width: u32,
-    quality: u8,
-) -> Result<String, String> {
+) -> Result<image::RgbImage, String> {
     if width == 0 {
         return Err("width 必须大于 0".to_string());
     }
@@ -133,12 +196,14 @@ fn render_page_to_jpeg_data_url(
         .render_with_config(&PdfRenderConfig::new().set_target_width(target_width))
         .map_err(|e| format!("渲染页面失败: {e}"))?;
 
-    let image = bitmap.as_image().into_rgb8();
+    Ok(bitmap.as_image().into_rgb8())
+}
 
+fn encode_rgb_image_to_jpeg_data_url(image: &image::RgbImage, quality: u8) -> Result<String, String> {
     let mut jpeg_bytes = Vec::new();
     let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpeg_bytes, quality);
     encoder
-        .encode_image(&image)
+        .encode_image(image)
         .map_err(|e| format!("JPEG 编码失败: {e}"))?;
 
     let b64 = general_purpose::STANDARD.encode(jpeg_bytes);
@@ -187,65 +252,79 @@ fn bookmark_to_node<'a>(bookmark: PdfBookmark<'a>, depth: u32) -> PdfBookmarkNod
 }
 
 #[tauri::command]
-pub fn extract_pdf_meta(path: String) -> Result<PdfMeta, String> {
-    let canonical = validate_book_path(&path)?;
+pub async fn extract_pdf_meta(path: String) -> Result<PdfMeta, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let canonical = validate_book_path(&path)?;
 
-    let filename = canonical
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("未知")
-        .to_string();
+        let filename = canonical
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("未知")
+            .to_string();
 
-    let pdfium = get_pdfium()?;
-    let document = load_document(pdfium, &canonical)?;
+        let (title, author, cover_image) = with_cached_document(&canonical, |document| {
+            let metadata = document.metadata();
 
-    let metadata = document.metadata();
+            let title = metadata
+                .get(PdfDocumentMetadataTagType::Title)
+                .map(|t| t.value().trim().to_string())
+                .filter(|t| !t.is_empty())
+                .unwrap_or_else(|| filename.clone());
 
-    let title = metadata
-        .get(PdfDocumentMetadataTagType::Title)
-        .map(|t| t.value().trim().to_string())
-        .filter(|t| !t.is_empty())
-        .unwrap_or_else(|| filename.clone());
+            let author = metadata
+                .get(PdfDocumentMetadataTagType::Author)
+                .map(|t| t.value().trim().to_string())
+                .filter(|t| !t.is_empty())
+                .unwrap_or_else(|| "未知作者".to_string());
 
-    let author = metadata
-        .get(PdfDocumentMetadataTagType::Author)
-        .map(|t| t.value().trim().to_string())
-        .filter(|t| !t.is_empty())
-        .unwrap_or_else(|| "未知作者".to_string());
+            let page_count = document.pages().len();
+            let cover_image = if page_count == 0 {
+                None
+            } else {
+                Some(render_page_to_rgb_image(document, 0, 300)?)
+            };
 
-    let page_count = document.pages().len();
-    let cover_base64 = if page_count == 0 {
-        String::new()
-    } else {
-        render_page_to_jpeg_data_url(&document, 0, 300, JPEG_QUALITY_COVER)?
-    };
+            Ok((title, author, cover_image))
+        })?;
 
-    Ok(PdfMeta {
-        title,
-        author,
-        cover_base64,
+        let cover_base64 = cover_image
+            .as_ref()
+            .map(|image| encode_rgb_image_to_jpeg_data_url(image, JPEG_QUALITY_COVER))
+            .transpose()?
+            .unwrap_or_default();
+
+        Ok(PdfMeta {
+            title,
+            author,
+            cover_base64,
+        })
     })
+    .await
+    .map_err(|e| format!("阻塞任务失败: {e}"))?
 }
 
 #[tauri::command]
-pub fn get_pdf_info(path: String) -> Result<PdfInfo, String> {
-    let canonical = validate_book_path(&path)?;
-
-    let pdfium = get_pdfium()?;
-    let document = load_document(pdfium, &canonical)?;
-
-    let page_count = document.pages().len() as u32;
-    let bookmarks = collect_bookmark_siblings(document.bookmarks().root(), 1);
-
-    Ok(PdfInfo {
-        page_count,
-        bookmarks,
+pub async fn get_pdf_info(path: String) -> Result<PdfInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let canonical = validate_book_path(&path)?;
+        with_cached_document(&canonical, |document| {
+            let page_count = document.pages().len() as u32;
+            let bookmarks = collect_bookmark_siblings(document.bookmarks().root(), 1);
+            Ok(PdfInfo {
+                page_count,
+                bookmarks,
+            })
+        })
     })
+    .await
+    .map_err(|e| format!("阻塞任务失败: {e}"))?
 }
 
 #[tauri::command]
-pub fn render_pdf_page(path: String, page_index: u32, width: u32) -> Result<String, String> {
-    let canonical = validate_book_path(&path)?;
+pub async fn render_pdf_page(path: String, page_index: u32, width: u32) -> Result<String, String> {
+    if width == 0 {
+        return Err("width 必须大于 0".to_string());
+    }
 
     if width > MAX_RENDER_WIDTH {
         return Err(format!(
@@ -253,10 +332,13 @@ pub fn render_pdf_page(path: String, page_index: u32, width: u32) -> Result<Stri
         ));
     }
 
-    let pdfium = get_pdfium()?;
-    let document = load_document(pdfium, &canonical)?;
-
-    let data_url = render_page_to_jpeg_data_url(&document, page_index, width, JPEG_QUALITY_PAGE)?;
-
-    Ok(data_url)
+    tauri::async_runtime::spawn_blocking(move || {
+        let canonical = validate_book_path(&path)?;
+        let image = with_cached_document(&canonical, |document| {
+            render_page_to_rgb_image(document, page_index, width)
+        })?;
+        encode_rgb_image_to_jpeg_data_url(&image, JPEG_QUALITY_PAGE)
+    })
+    .await
+    .map_err(|e| format!("阻塞任务失败: {e}"))?
 }

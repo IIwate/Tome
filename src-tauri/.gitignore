@@ -1,3 +1,7 @@
 # Generated
 /target/
 .ace-tool/
+
+# Test fixtures（保留目录，忽略 PDF 大文件）
+/tests/fixtures/**/*.pdf
+/tests/fixtures/**/*.PDF

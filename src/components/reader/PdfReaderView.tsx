@@ -9,6 +9,8 @@ import {
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { FoliateTocItem } from "@/lib/foliate";
+import { createConcurrencyLimiter } from "@/lib/concurrency-limiter";
+import { calcRenderWindow } from "@/lib/render-window";
 import { logInfo } from "@/lib/logger";
 
 interface PdfReaderViewProps {
@@ -81,6 +83,10 @@ function parseLastPosition(lastPosition: string | null | undefined): number | nu
 }
 
 const SOURCE = "reader/PdfReaderView";
+const PAGE_GAP_PX = 24; // tailwind: mb-6（默认 1.5rem = 24px）
+const WINDOW_BUFFER_PAGES = 8;
+// 与后端 src-tauri/src/commands/pdf.rs 的 MAX_RENDER_WIDTH 对齐
+const MAX_RENDER_PDF_PAGE_WIDTH = 2000;
 
 interface PdfPageItemProps {
   pageIndex: number;
@@ -155,8 +161,16 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
     const [showSpinner, setShowSpinner] = useState(false);
     const [renderWidth, setRenderWidth] = useState(800);
     const [, forceRender] = useState(0);
+    const [scrollAnchor, setScrollAnchor] = useState(0);
+    const scrollAnchorRef = useRef(0);
 
     const fileTokenRef = useRef(0);
+    const renderPageLimiterRef = useRef<ReturnType<
+      typeof createConcurrencyLimiter
+    > | null>(null);
+    if (!renderPageLimiterRef.current) {
+      renderPageLimiterRef.current = createConcurrencyLimiter(2);
+    }
     const pageElsRef = useRef<Map<number, HTMLDivElement>>(new Map());
     const cacheRef = useRef<Map<number, PageCache>>(new Map());
     const nearPagesRef = useRef<Set<number>>(new Set());
@@ -203,6 +217,8 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
           visibleObserverRef.current?.unobserve(prev);
         }
         map.delete(pageIndex);
+        nearPagesRef.current.delete(pageIndex);
+        visiblePagesRef.current.delete(pageIndex);
       }
     }, []);
 
@@ -245,12 +261,22 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
         requestRerender();
 
         try {
-          const width = Math.max(1, Math.round(renderWidth));
-          const raw = await invoke<string>("render_pdf_page", {
-            path: filePath,
-            pageIndex,
-            width,
+          const limit = renderPageLimiterRef.current;
+          if (!limit) return;
+          const width = Math.min(
+            Math.max(1, Math.round(renderWidth)),
+            MAX_RENDER_PDF_PAGE_WIDTH
+          );
+          const raw = await limit(async () => {
+            // 切书后：排队中的任务开始执行前直接跳过，避免浪费渲染
+            if (fileTokenRef.current !== token) return null;
+            return invoke<string>("render_pdf_page", {
+              path: filePath,
+              pageIndex,
+              width,
+            });
           });
+          if (raw == null) return;
           if (fileTokenRef.current !== token) return;
 
           const next = map.get(pageIndex) ?? cache;
@@ -280,8 +306,16 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
       if (near.size === 0) return;
 
       const wanted = new Set<number>();
+      const priority = new Set<number>();
       let minNear = Number.POSITIVE_INFINITY;
       let maxNear = Number.NEGATIVE_INFINITY;
+
+      for (const idx of visiblePagesRef.current) {
+        for (let d = -2; d <= 2; d++) {
+          const p = idx + d;
+          if (p >= 0 && p < pageCount) priority.add(p);
+        }
+      }
 
       for (const idx of near) {
         minNear = Math.min(minNear, idx);
@@ -292,7 +326,12 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
         }
       }
 
-      for (const idx of wanted) {
+      const priorityList = Array.from(priority).sort((a, b) => a - b);
+      for (const idx of priorityList) void ensureRenderPage(idx);
+
+      const wantedList = Array.from(wanted).sort((a, b) => a - b);
+      for (const idx of wantedList) {
+        if (priority.has(idx)) continue;
         void ensureRenderPage(idx);
       }
 
@@ -325,21 +364,48 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
       });
     }, [processNearPages]);
 
+    const estimatedHeight = Math.max(Math.round(renderWidth * 1.4), 320);
+    const estimatedStep = Math.max(1, estimatedHeight + PAGE_GAP_PX);
+
     const scrollToPage = useCallback(
       (pageIndex: number, behavior: ScrollBehavior) => {
         const container = containerRef.current;
         if (!container || pageCount <= 0) return;
 
         const idx = clampInt(pageIndex, 0, pageCount - 1);
+        if (scrollAnchorRef.current !== idx) {
+          scrollAnchorRef.current = idx;
+          setScrollAnchor(idx);
+        }
+        const near = nearPagesRef.current;
+        if (!near.has(idx)) {
+          near.add(idx);
+          requestRerender();
+          scheduleProcessNear();
+        }
         const el =
           pageElsRef.current.get(idx) ??
           (container.querySelector(
             `[data-page-index="${idx}"]`
           ) as HTMLDivElement | null);
 
-        el?.scrollIntoView({ behavior, block: "start" });
+        if (el) {
+          el.scrollIntoView({ behavior, block: "start" });
+          return;
+        }
+
+        container.scrollTo({ top: idx * estimatedStep, behavior });
+
+        requestAnimationFrame(() => {
+          const nextEl =
+            pageElsRef.current.get(idx) ??
+            (container.querySelector(
+              `[data-page-index="${idx}"]`
+            ) as HTMLDivElement | null);
+          nextEl?.scrollIntoView({ behavior, block: "start" });
+        });
       },
-      [pageCount]
+      [estimatedStep, pageCount, requestRerender, scheduleProcessNear]
     );
 
     useImperativeHandle(
@@ -362,6 +428,8 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
       nearPagesRef.current.clear();
       visiblePagesRef.current.clear();
       lastReportedRef.current = null;
+      scrollAnchorRef.current = 0;
+      setScrollAnchor(0);
 
       (async () => {
         try {
@@ -449,7 +517,10 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
             }
           }
 
-          if (changed) scheduleProcessNear();
+          if (changed) {
+            requestRerender();
+            scheduleProcessNear();
+          }
         },
         {
           root: container,
@@ -488,7 +559,7 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
         nearPagesRef.current.clear();
         visiblePagesRef.current.clear();
       };
-    }, [error, loading, pageCount, scheduleProcessNear]);
+    }, [error, loading, pageCount, requestRerender, scheduleProcessNear]);
 
     // 滚动进度追踪（节流 100ms）
     useEffect(() => {
@@ -497,12 +568,21 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
 
       const flushProgress = () => {
         const visible = visiblePagesRef.current;
+        const estimatedIdx = clampInt(
+          Math.floor(container.scrollTop / estimatedStep),
+          0,
+          pageCount - 1
+        );
         const idx =
           visible.size > 0
             ? Math.min(...Array.from(visible))
-            : clampInt(Math.round(container.scrollTop / Math.max(container.clientHeight, 1)), 0, pageCount - 1);
+            : estimatedIdx;
 
         const pageIndex = clampInt(idx, 0, pageCount - 1);
+        if (scrollAnchorRef.current !== pageIndex) {
+          scrollAnchorRef.current = pageIndex;
+          setScrollAnchor(pageIndex);
+        }
         const position = `page:${pageIndex}`;
         const percent = Math.round(
           (pageIndex / Math.max(pageCount - 1, 1)) * 100
@@ -530,7 +610,18 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
         }, 100);
       };
 
-      const onScroll = () => requestFlush();
+      const onScroll = () => {
+        const nextAnchor = clampInt(
+          Math.floor(container.scrollTop / estimatedStep),
+          0,
+          pageCount - 1
+        );
+        if (scrollAnchorRef.current !== nextAnchor) {
+          scrollAnchorRef.current = nextAnchor;
+          setScrollAnchor(nextAnchor);
+        }
+        requestFlush();
+      };
       container.addEventListener("scroll", onScroll, { passive: true });
 
       return () => {
@@ -540,7 +631,7 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
         progressPendingRef.current = false;
         flushProgress();
       };
-    }, [error, loading, pageCount]);
+    }, [error, estimatedStep, loading, pageCount]);
 
     // 恢复上次阅读位置
     useEffect(() => {
@@ -592,7 +683,35 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
       return () => window.removeEventListener("keydown", onKeyDown);
     }, [error, loading]);
 
-    const estimatedHeight = Math.max(Math.round(renderWidth * 1.4), 320);
+    const baseWindow = calcRenderWindow({
+      nearPages: nearPagesRef.current,
+      pageCount,
+      buffer: WINDOW_BUFFER_PAGES,
+      estimatedHeight,
+      gap: PAGE_GAP_PX,
+    });
+
+    let windowResult = baseWindow;
+    if (pageCount > 0) {
+      const anchor = clampInt(scrollAnchor, 0, pageCount - 1);
+      if (
+        nearPagesRef.current.size === 0 ||
+        anchor < baseWindow.start ||
+        anchor > baseWindow.end
+      ) {
+        const merged = new Set<number>(nearPagesRef.current);
+        merged.add(anchor);
+        windowResult = calcRenderWindow({
+          nearPages: merged,
+          pageCount,
+          buffer: WINDOW_BUFFER_PAGES,
+          estimatedHeight,
+          gap: PAGE_GAP_PX,
+        });
+      }
+    }
+
+    const { start, end, topPadding, bottomPadding } = windowResult;
 
     return (
       <div
@@ -614,23 +733,34 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
         )}
 
         <div ref={contentRef} className="px-4 py-6">
-          {pageCount > 0 &&
-            Array.from({ length: pageCount }, (_, i) => {
-              const cache = cacheRef.current.get(i);
-              return (
-                <PdfPageItem
-                  key={i}
-                  pageIndex={i}
-                  dataUrl={cache?.dataUrl ?? null}
-                  height={cache?.height ?? null}
-                  loading={cache?.loading ?? false}
-                  error={cache?.error ?? null}
-                  estimatedHeight={estimatedHeight}
-                  registerEl={registerEl}
-                  onImageLoaded={onImageLoaded}
-                />
-              );
-            })}
+          {pageCount > 0 && (
+            <>
+              {topPadding > 0 && (
+                <div style={{ height: topPadding }} aria-hidden="true" />
+              )}
+              {end >= start &&
+                Array.from({ length: end - start + 1 }, (_, offset) => {
+                  const i = start + offset;
+                  const cache = cacheRef.current.get(i);
+                  return (
+                    <PdfPageItem
+                      key={i}
+                      pageIndex={i}
+                      dataUrl={cache?.dataUrl ?? null}
+                      height={cache?.height ?? null}
+                      loading={cache?.loading ?? false}
+                      error={cache?.error ?? null}
+                      estimatedHeight={estimatedHeight}
+                      registerEl={registerEl}
+                      onImageLoaded={onImageLoaded}
+                    />
+                  );
+                })}
+              {bottomPadding > 0 && (
+                <div style={{ height: bottomPadding }} aria-hidden="true" />
+              )}
+            </>
+          )}
         </div>
 
         <div className="h-[40vh]" aria-hidden="true" />
