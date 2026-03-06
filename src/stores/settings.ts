@@ -15,6 +15,7 @@ interface SettingsState {
   bookDeleteSkipConfirm: boolean;
   bookDeleteMode: BookDeleteMode;
   pdfCacheBaseDir: string;
+  cacheMaxBytes: number;
   _hydrated: boolean;
 }
 
@@ -27,6 +28,7 @@ interface SettingsActions {
   setBookDeleteSkipConfirm: (skip: boolean) => void;
   setBookDeleteMode: (mode: BookDeleteMode) => void;
   setPdfCacheBaseDir: (pdfCacheBaseDir: string) => void;
+  setCacheMaxBytes: (cacheMaxBytes: number) => void;
   hydrate: () => Promise<void>;
 }
 
@@ -39,6 +41,7 @@ const DEFAULTS: Omit<SettingsState, "_hydrated"> = {
   bookDeleteSkipConfirm: false,
   bookDeleteMode: "library-only",
   pdfCacheBaseDir: "",
+  cacheMaxBytes: 256 * 1024 * 1024,
 };
 
 function applyTheme(theme: Theme) {
@@ -57,6 +60,7 @@ function getPersistedSettingsSnapshot() {
     bookDeleteSkipConfirm: state.bookDeleteSkipConfirm,
     bookDeleteMode: state.bookDeleteMode,
     pdfCacheBaseDir: state.pdfCacheBaseDir,
+    cacheMaxBytes: state.cacheMaxBytes,
   };
 }
 
@@ -73,6 +77,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
     setBookDeleteSkipConfirm: (skip) => set({ bookDeleteSkipConfirm: skip }),
     setBookDeleteMode: (mode) => set({ bookDeleteMode: mode }),
     setPdfCacheBaseDir: (pdfCacheBaseDir) => set({ pdfCacheBaseDir }),
+    setCacheMaxBytes: (cacheMaxBytes) => set({ cacheMaxBytes }),
 
     hydrate: async () => {
       const persisted = await loadPersistedSettings(DEFAULTS);
@@ -116,6 +121,7 @@ useSettingsStore.subscribe(
     bookDeleteSkipConfirm: s.bookDeleteSkipConfirm,
     bookDeleteMode: s.bookDeleteMode,
     pdfCacheBaseDir: s.pdfCacheBaseDir,
+    cacheMaxBytes: s.cacheMaxBytes,
   }),
   () => {
     if (!useSettingsStore.getState()._hydrated) return;

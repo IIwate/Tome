@@ -39,12 +39,6 @@ function commitChange() {
   }
 }
 
-export function setEnabled(next: boolean) {
-  if (enabled === next) return;
-  enabled = next;
-  commitChange();
-}
-
 function isErrorLike(
   value: unknown
 ): value is { name?: unknown; message?: unknown; stack?: unknown; cause?: unknown } {
@@ -210,7 +204,6 @@ export function subscribe(listener: Listener): () => void {
 }
 
 export const logger = {
-  setEnabled,
   logError,
   logInfo,
   getEntries,

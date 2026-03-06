@@ -39,7 +39,10 @@ interface PdfCacheStats {
   effective_dir: string;
   file_count: number;
   total_bytes: number;
+  max_bytes: number;
 }
+
+const BYTES_PER_MB = 1024 * 1024;
 
 const DELETE_MODES: {
   value: BookDeleteMode;
@@ -94,11 +97,13 @@ function getDisplayCacheDir(config: PdfCacheConfig | null): string {
 }
 
 export function AppSettingsPanel({ open, onClose }: AppSettingsPanelProps) {
+  const cacheMaxBytes = useSettingsStore((s) => s.cacheMaxBytes);
   const bookDeleteSkipConfirm = useSettingsStore(
     (s) => s.bookDeleteSkipConfirm
   );
   const bookDeleteMode = useSettingsStore((s) => s.bookDeleteMode);
 
+  const setCacheMaxBytes = useSettingsStore((s) => s.setCacheMaxBytes);
   const setPdfCacheBaseDir = useSettingsStore((s) => s.setPdfCacheBaseDir);
   const setBookDeleteSkipConfirm = useSettingsStore(
     (s) => s.setBookDeleteSkipConfirm
@@ -110,6 +115,9 @@ export function AppSettingsPanel({ open, onClose }: AppSettingsPanelProps) {
   const [cacheStats, setCacheStats] = useState<PdfCacheStats | null>(null);
   const [cacheBusy, setCacheBusy] = useState(false);
   const [cacheError, setCacheError] = useState<string | null>(null);
+  const [cacheLimitMbInput, setCacheLimitMbInput] = useState(() =>
+    String(Math.round(cacheMaxBytes / BYTES_PER_MB))
+  );
   const displayCacheDir = getDisplayCacheDir(cacheConfig);
 
   const refreshPdfCacheInfo = useCallback(async () => {
@@ -154,6 +162,27 @@ export function AppSettingsPanel({ open, onClose }: AppSettingsPanelProps) {
     }
   }, [refreshPdfCacheInfo, setPdfCacheBaseDir]);
 
+  const handleSaveCacheLimit = useCallback(async () => {
+    const nextMb = Number.parseInt(cacheLimitMbInput.trim(), 10);
+    if (!Number.isFinite(nextMb) || nextMb < 64) {
+      setCacheError("缓存上限至少为 64 MB");
+      return;
+    }
+
+    const nextBytes = nextMb * BYTES_PER_MB;
+    setCacheBusy(true);
+    try {
+      setCacheMaxBytes(nextBytes);
+      await flushSettingsPersist();
+      setCacheError(null);
+      await refreshPdfCacheInfo();
+    } catch (err) {
+      setCacheError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCacheBusy(false);
+    }
+  }, [cacheLimitMbInput, refreshPdfCacheInfo, setCacheMaxBytes]);
+
   const handleUseDefaultPdfCacheDir = useCallback(async () => {
     setCacheBusy(true);
     try {
@@ -197,6 +226,11 @@ export function AppSettingsPanel({ open, onClose }: AppSettingsPanelProps) {
     }
     void refreshPdfCacheInfo();
   }, [open, refreshPdfCacheInfo]);
+
+  useEffect(() => {
+    const next = cacheStats?.max_bytes ?? cacheMaxBytes;
+    setCacheLimitMbInput(String(Math.max(64, Math.round(next / BYTES_PER_MB))));
+  }, [cacheMaxBytes, cacheStats]);
 
   useEffect(() => {
     if (!open) return;
@@ -298,11 +332,11 @@ export function AppSettingsPanel({ open, onClose }: AppSettingsPanelProps) {
                   <p className="text-xs font-medium text-foreground">
                     缓存目录
                   </p>
-                  <p className="text-[11px] text-muted-foreground">
-                    {cacheConfig?.using_default
-                      ? "当前使用系统默认缓存目录"
-                      : "当前使用自定义缓存目录"}
-                  </p>
+                  {!cacheConfig?.using_default && (
+                    <p className="text-[11px] text-muted-foreground">
+                      当前使用自定义缓存目录
+                    </p>
+                  )}
                 </div>
                   <button
                     type="button"
@@ -327,9 +361,34 @@ export function AppSettingsPanel({ open, onClose }: AppSettingsPanelProps) {
                   <span>缓存大小</span>
                   <span>
                     {cacheStats
-                      ? `${formatBytes(cacheStats.total_bytes)} · ${cacheStats.file_count} 个文件`
+                      ? `${formatBytes(cacheStats.total_bytes)} / ${formatBytes(cacheStats.max_bytes)} · ${cacheStats.file_count} 个文件`
                       : "正在读取..."}
                   </span>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[11px] text-muted-foreground">
+                    缓存上限
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      min={64}
+                      step={64}
+                      value={cacheLimitMbInput}
+                      onChange={(e) => setCacheLimitMbInput(e.target.value)}
+                      className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-xs text-foreground outline-none transition-colors focus:border-primary/60"
+                    />
+                    <span className="text-xs text-muted-foreground">MB</span>
+                    <button
+                      type="button"
+                      onClick={() => void handleSaveCacheLimit()}
+                      disabled={cacheBusy}
+                      className="shrink-0 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs font-medium text-foreground/80 transition-colors hover:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      保存
+                    </button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-1.5">

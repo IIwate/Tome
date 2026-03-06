@@ -3,7 +3,7 @@ use http::{header::{CACHE_CONTROL, CONTENT_TYPE}, Response, StatusCode};
 use pdfium_render::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -85,6 +85,7 @@ pub struct PdfCacheStats {
     pub effective_dir: String,
     pub file_count: u64,
     pub total_bytes: u64,
+    pub max_bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -100,8 +101,10 @@ const JPEG_QUALITY_COVER: u8 = 85;
 const JPEG_QUALITY_PAGE: u8 = 70;
 const CACHE_SCHEMA_VERSION: u32 = 1;
 const CACHE_BUCKET_PX: u32 = 64;
+const CACHE_MAX_BYTES_DEFAULT: u64 = 256 * 1024 * 1024;
 const CACHE_SETTINGS_FILE: &str = "settings.json";
 const CACHE_SETTINGS_KEY: &str = "pdfCacheBaseDir";
+const CACHE_MAX_BYTES_SETTINGS_KEY: &str = "cacheMaxBytes";
 const CACHE_SUBDIR: &str = "pdf_pages";
 const CACHE_VERSION_SUBDIR: &str = "v1";
 const CACHE_PROTOCOL_SCHEME: &str = "tome-cache";
@@ -116,6 +119,13 @@ static PAGE_LOCKS: LazyLock<Mutex<HashMap<PageLockKey, Arc<StdMutex<()>>>>> =
 static CACHE_RESOURCE_REGISTRY: LazyLock<Mutex<HashMap<String, PathBuf>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static PAGE_RENDER_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+#[derive(Debug, Clone)]
+struct CacheFileEntry {
+    path: PathBuf,
+    size: u64,
+    modified_ms: u64,
+}
 
 struct CachedDoc {
     path: PathBuf,
@@ -165,7 +175,7 @@ pub async fn render_pdf_page_with_cache_root_for_test(
 
     tauri::async_runtime::spawn_blocking(move || {
         let canonical = validate_book_path(&path)?;
-        render_pdf_page_cached_inner(cache_root, &canonical, page_index, width, |target_width| {
+        render_pdf_page_cached_inner(cache_root, &canonical, page_index, width, CACHE_MAX_BYTES_DEFAULT, |target_width| {
             let image = with_cached_document(&canonical, |document| {
                 PAGE_RENDER_COUNT.fetch_add(1, Ordering::Relaxed);
                 render_page_to_rgb_image(document, page_index, target_width)
@@ -389,6 +399,30 @@ fn load_custom_cache_base_dir<R: Runtime>(app: &AppHandle<R>) -> Result<Option<S
     }))
 }
 
+fn load_cache_max_bytes<R: Runtime>(app: &AppHandle<R>) -> Result<Option<u64>, String> {
+    let store = app
+        .store(CACHE_SETTINGS_FILE)
+        .map_err(|e| format!("读取设置失败: {e}"))?;
+
+    let value = store.get(CACHE_MAX_BYTES_SETTINGS_KEY);
+    Ok(value.and_then(|value| match value {
+        Value::Number(num) => num.as_u64().filter(|bytes| *bytes > 0),
+        Value::String(text) => text
+            .trim()
+            .parse::<u64>()
+            .ok()
+            .filter(|bytes| *bytes > 0),
+        _ => None,
+    }))
+}
+
+fn resolve_cache_max_bytes<R: Runtime>(app: &AppHandle<R>) -> u64 {
+    load_cache_max_bytes(app)
+        .ok()
+        .flatten()
+        .unwrap_or(CACHE_MAX_BYTES_DEFAULT)
+}
+
 fn resolve_cache_root<R: Runtime>(app: &AppHandle<R>, custom_base: Option<&str>) -> Option<PathBuf> {
     let base_dir = custom_base
         .and_then(normalize_optional_dir)
@@ -431,6 +465,18 @@ fn page_cache_path(cache_dir: &Path, page_index: u32, width: u32) -> PathBuf {
 
 fn path_to_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
+}
+
+fn system_time_to_ms(time: SystemTime) -> u64 {
+    time.duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+fn touch_cache_file(path: &Path) {
+    if let Ok(bytes) = fs::read(path) {
+        let _ = atomic_write_jpeg(path, &bytes);
+    }
 }
 
 fn cache_resource_key(doc_key: &str, page_index: u32, width: u32) -> String {
@@ -591,7 +637,10 @@ fn read_and_validate_meta(
 fn try_read_page_cache(cache_dir: &Path, page_index: u32, bucketed_width: u32) -> Option<PathBuf> {
     let path = page_cache_path(cache_dir, page_index, bucketed_width);
     match fs::metadata(&path) {
-        Ok(meta) if meta.is_file() && meta.len() > 0 => Some(path),
+        Ok(meta) if meta.is_file() && meta.len() > 0 => {
+            touch_cache_file(&path);
+            Some(path)
+        }
         _ => None,
     }
 }
@@ -656,6 +705,130 @@ fn get_page_lock(key: PageLockKey) -> Result<Arc<StdMutex<()>>, String> {
         .clone())
 }
 
+fn forget_cache_resource_by_path(path: &Path) {
+    if let Ok(mut registry) = CACHE_RESOURCE_REGISTRY.lock() {
+        registry.retain(|_, value| value != path);
+    }
+}
+
+fn collect_cache_file_entries(root: &Path) -> Result<Vec<CacheFileEntry>, String> {
+    if !root.exists() {
+        return Ok(Vec::new());
+    }
+    if !root.is_dir() {
+        return Err("缓存路径不是目录".to_string());
+    }
+
+    let mut entries = Vec::new();
+    for entry in WalkDir::new(root) {
+        let entry = entry.map_err(|e| format!("遍历缓存目录失败: {e}"))?;
+        if !entry.file_type().is_file() {
+            continue;
+        }
+
+        let path = entry.into_path();
+        let is_jpeg = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.eq_ignore_ascii_case("jpg"))
+            .unwrap_or(false);
+        if !is_jpeg {
+            continue;
+        }
+
+        let metadata = fs::metadata(&path).map_err(|e| format!("读取缓存文件信息失败: {e}"))?;
+        let modified_ms = metadata
+            .modified()
+            .map(system_time_to_ms)
+            .unwrap_or(0);
+        entries.push(CacheFileEntry {
+            path,
+            size: metadata.len(),
+            modified_ms,
+        });
+    }
+
+    Ok(entries)
+}
+
+fn prune_empty_cache_dirs(root: &Path) -> Result<(), String> {
+    if !root.is_dir() {
+        return Ok(());
+    }
+
+    let read_dir = fs::read_dir(root).map_err(|e| format!("遍历缓存目录失败: {e}"))?;
+    for entry in read_dir {
+        let entry = entry.map_err(|e| format!("遍历缓存目录失败: {e}"))?;
+        let doc_dir = entry.path();
+        if !doc_dir.is_dir() {
+            continue;
+        }
+
+        let pages_dir = doc_dir.join("pages");
+        let has_pages = match fs::read_dir(&pages_dir) {
+            Ok(entries) => entries.filter_map(Result::ok).any(|page| page.path().is_file()),
+            Err(err) if err.kind() == ErrorKind::NotFound => false,
+            Err(err) => return Err(format!("遍历缓存页目录失败: {err}")),
+        };
+
+        if !has_pages {
+            fs::remove_dir_all(&doc_dir).map_err(|e| format!("清理空缓存目录失败: {e}"))?;
+        }
+    }
+
+    Ok(())
+}
+
+fn enforce_cache_size_limit(
+    root: &Path,
+    max_bytes: u64,
+    protected_paths: &[PathBuf],
+) -> Result<(u64, u64), String> {
+    if max_bytes == 0 || !root.exists() {
+        return Ok((0, 0));
+    }
+
+    let (_, mut total_bytes) = collect_dir_stats(root)?;
+    if total_bytes <= max_bytes {
+        return Ok((0, 0));
+    }
+
+    let protected: HashSet<PathBuf> = protected_paths.iter().cloned().collect();
+    let mut entries = collect_cache_file_entries(root)?;
+    entries.retain(|entry| !protected.contains(&entry.path));
+    entries.sort_by(|a, b| {
+        a.modified_ms
+            .cmp(&b.modified_ms)
+            .then_with(|| a.path.cmp(&b.path))
+    });
+
+    let mut removed_files = 0_u64;
+    let mut removed_bytes = 0_u64;
+
+    for entry in entries {
+        if total_bytes <= max_bytes {
+            break;
+        }
+
+        match fs::remove_file(&entry.path) {
+            Ok(()) => {
+                total_bytes = total_bytes.saturating_sub(entry.size);
+                removed_files += 1;
+                removed_bytes += entry.size;
+                forget_cache_resource_by_path(&entry.path);
+            }
+            Err(err) if err.kind() == ErrorKind::NotFound => {}
+            Err(err) => return Err(format!("删除旧缓存文件失败: {err}")),
+        }
+    }
+
+    if removed_files > 0 {
+        prune_empty_cache_dirs(root)?;
+    }
+
+    Ok((removed_files, removed_bytes))
+}
+
 fn collect_dir_stats(root: &Path) -> Result<(u64, u64), String> {
     if !root.exists() {
         return Ok((0, 0));
@@ -711,6 +884,7 @@ fn render_pdf_page_cached_inner<F>(
     pdf_path: &Path,
     page_index: u32,
     width: u32,
+    max_bytes: u64,
     render_fn: F,
 ) -> Result<RenderPageResult, String>
 where
@@ -767,6 +941,7 @@ where
             &cache_meta,
         ) {
             Ok(file_path) => {
+                let _ = enforce_cache_size_limit(&cache_root, max_bytes, &[file_path.clone()]);
                 remember_cache_resource(&resource_key, &file_path);
                 Ok(RenderPageResult::File {
                     page_index,
@@ -871,7 +1046,8 @@ pub async fn render_pdf_page(
     tauri::async_runtime::spawn_blocking(move || {
         let canonical = validate_book_path(&path)?;
         let cache_root = resolve_cache_root(&app_handle, None);
-        render_pdf_page_cached_inner(cache_root, &canonical, page_index, width, |target_width| {
+        let max_bytes = resolve_cache_max_bytes(&app_handle);
+        render_pdf_page_cached_inner(cache_root, &canonical, page_index, width, max_bytes, |target_width| {
             let image = with_cached_document(&canonical, |document| {
                 PAGE_RENDER_COUNT.fetch_add(1, Ordering::Relaxed);
                 render_page_to_rgb_image(document, page_index, target_width)
@@ -925,6 +1101,7 @@ pub async fn pdf_cache_get_stats(app: AppHandle) -> Result<PdfCacheStats, String
             effective_dir: path_to_string(&effective_dir),
             file_count,
             total_bytes,
+            max_bytes: resolve_cache_max_bytes(&app_handle),
         })
     })
     .await
@@ -1093,12 +1270,12 @@ mod tests {
         write_source_file(&pdf_path, b"hello");
         let render_count = AtomicUsize::new(0);
 
-        let first = render_pdf_page_cached_inner(Some(root.clone()), &pdf_path, 0, 800, |_| {
+        let first = render_pdf_page_cached_inner(Some(root.clone()), &pdf_path, 0, 800, CACHE_MAX_BYTES_DEFAULT, |_| {
             render_count.fetch_add(1, Ordering::Relaxed);
             Ok(sample_jpeg_bytes())
         })
         .expect("首次渲染失败");
-        let second = render_pdf_page_cached_inner(Some(root.clone()), &pdf_path, 0, 832, |_| {
+        let second = render_pdf_page_cached_inner(Some(root.clone()), &pdf_path, 0, 832, CACHE_MAX_BYTES_DEFAULT, |_| {
             render_count.fetch_add(1, Ordering::Relaxed);
             Ok(sample_jpeg_bytes())
         })
@@ -1128,7 +1305,7 @@ mod tests {
         write_source_file(&pdf_path, b"hello");
         let render_count = AtomicUsize::new(0);
 
-        render_pdf_page_cached_inner(Some(root.clone()), &pdf_path, 0, 800, |_| {
+        render_pdf_page_cached_inner(Some(root.clone()), &pdf_path, 0, 800, CACHE_MAX_BYTES_DEFAULT, |_| {
             render_count.fetch_add(1, Ordering::Relaxed);
             Ok(sample_jpeg_bytes())
         })
@@ -1137,7 +1314,7 @@ mod tests {
         thread::sleep(Duration::from_millis(20));
         write_source_file(&pdf_path, b"hello-world");
 
-        render_pdf_page_cached_inner(Some(root.clone()), &pdf_path, 0, 800, |_| {
+        render_pdf_page_cached_inner(Some(root.clone()), &pdf_path, 0, 800, CACHE_MAX_BYTES_DEFAULT, |_| {
             render_count.fetch_add(1, Ordering::Relaxed);
             Ok(sample_jpeg_bytes())
         })
@@ -1158,7 +1335,7 @@ mod tests {
         fs::create_dir_all(&root).expect("创建目录失败");
         fs::write(&root_as_file, b"not-a-dir").expect("写入文件失败");
 
-        let result = render_pdf_page_cached_inner(Some(root_as_file), &pdf_path, 0, 800, |_| {
+        let result = render_pdf_page_cached_inner(Some(root_as_file), &pdf_path, 0, 800, CACHE_MAX_BYTES_DEFAULT, |_| {
             Ok(sample_jpeg_bytes())
         })
         .expect("降级渲染失败");
@@ -1169,6 +1346,27 @@ mod tests {
             }
             other => panic!("预期 data 结果，实际为 {other:?}"),
         }
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn enforce_cache_size_limit_removes_oldest_pages() {
+        let root = unique_temp_path("size-limit");
+        let old = root.join("doc-a/pages/0_832.jpg");
+        let new = root.join("doc-b/pages/0_832.jpg");
+
+        atomic_write_jpeg(&old, &[1; 10]).expect("写入旧页缓存失败");
+        thread::sleep(Duration::from_millis(20));
+        atomic_write_jpeg(&new, &[2; 10]).expect("写入新页缓存失败");
+
+        let (removed_files, removed_bytes) =
+            enforce_cache_size_limit(&root, 15, &[new.clone()]).expect("执行 LRU 失败");
+
+        assert_eq!(removed_files, 1);
+        assert!(removed_bytes >= 10);
+        assert!(!old.exists(), "应先删除更旧的缓存页");
+        assert!(new.exists(), "受保护页不应被删除");
 
         let _ = fs::remove_dir_all(&root);
     }
