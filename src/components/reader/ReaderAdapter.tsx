@@ -2,6 +2,7 @@ import { forwardRef, useImperativeHandle, useRef, type ForwardRefExoticComponent
 import { EpubScrollView, type EpubScrollViewHandle } from "./EpubScrollView";
 import { PdfReaderView, type PdfReaderViewHandle } from "./PdfReaderView";
 import { TxtReaderView, type TxtReaderViewHandle } from "./TxtReaderView";
+import type { BookConfig } from "@/lib/book-config";
 import type { BookDocFormat, BookDocTocItem } from "@/lib/book-doc";
 
 export interface ReaderAdapterHandle {
@@ -11,6 +12,7 @@ export interface ReaderAdapterHandle {
 export interface ReaderAdapterProps {
   filePath: string;
   lastPosition?: string | null;
+  config: BookConfig;
   onRelocate?: (position: string | null, percent: number) => void;
   onTocLoaded?: (toc: BookDocTocItem[]) => void;
   onError?: (error: Error) => void;

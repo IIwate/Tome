@@ -12,8 +12,8 @@ import {
   injectShadowStyles,
   type ParsedEpub,
 } from "@/lib/foliate";
+import type { BookConfig } from "@/lib/book-config";
 import { fromFoliateToc, type BookDocTocItem } from "@/lib/book-doc";
-import { useSettingsStore } from "@/stores/settings";
 import { logError, logInfo } from "@/lib/logger";
 
 /* ---------- 类型 ---------- */
@@ -21,6 +21,7 @@ import { logError, logInfo } from "@/lib/logger";
 interface EpubScrollViewProps {
   filePath: string;
   lastPosition?: string | null;
+  config: BookConfig;
   onRelocate?: (position: string | null, percent: number) => void;
   onTocLoaded?: (toc: BookDocTocItem[]) => void;
   onError?: (error: Error) => void;
@@ -140,7 +141,7 @@ export const EpubScrollView = forwardRef<
   EpubScrollViewHandle,
   EpubScrollViewProps
 >(function EpubScrollView(
-  { filePath, lastPosition, onRelocate, onTocLoaded, onError },
+  { filePath, lastPosition, config, onRelocate, onTocLoaded, onError },
   ref
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -159,11 +160,7 @@ export const EpubScrollView = forwardRef<
   const [showSpinner, setShowSpinner] = useState(false);
 
   // 排版设置
-  const fontFamily = useSettingsStore((s) => s.fontFamily);
-  const fontSize = useSettingsStore((s) => s.fontSize);
-  const lineHeight = useSettingsStore((s) => s.lineHeight);
-  const margin = useSettingsStore((s) => s.margin);
-  const theme = useSettingsStore((s) => s.theme);
+  const { theme, fontFamily, fontSize, lineHeight, margin } = config.viewSettings;
 
   // ---------- 暴露 Handle ----------
 

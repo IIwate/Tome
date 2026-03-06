@@ -15,6 +15,13 @@ import {
   type BookDoc,
   type BookReadingProgress,
 } from "@/lib/book-doc";
+import {
+  createBookConfig,
+  hasBookConfigOverride,
+  mergeBookConfig,
+  mergeBookConfigOverride,
+} from "@/lib/book-config";
+import { useViewSettings } from "@/stores/settings";
 import { logError } from "@/lib/logger";
 
 interface ReaderPageProps {
@@ -30,6 +37,9 @@ export function ReaderPage({ book, onBack }: ReaderPageProps) {
   const setChapters = useReaderStore((s) => s.setChapters);
   const chapters = useReaderStore((s) => s.chapters);
   const percent = useReaderStore((s) => s.percent);
+  const viewSettings = useViewSettings();
+  const globalBookConfig = createBookConfig(viewSettings);
+  const effectiveBookConfig = mergeBookConfig(globalBookConfig, book.bookConfig);
   const currentBookDoc: BookDoc = createBookDocShell({
     format: book.format,
     title: book.title,
@@ -44,9 +54,13 @@ export function ReaderPage({ book, onBack }: ReaderPageProps) {
       position: book.progress.position,
       percent: book.progress.percent,
     },
-    doc: currentBookDoc,
+    doc: {
+      ...currentBookDoc,
+      toc: chapters,
+    },
   });
   const ReaderAdapter = getReaderAdapterComponent(session.format);
+  const hasOverrides = hasBookConfigOverride(book.bookConfig);
 
   const lastBookProgressRef = useRef({
     position: book.progress.position,
@@ -103,6 +117,19 @@ export function ReaderPage({ book, onBack }: ReaderPageProps) {
     [setChapters]
   );
 
+  const handleChangeViewSettings = useCallback(
+    (patch: Partial<typeof viewSettings>) => {
+      updateBook(book.id, {
+        bookConfig: mergeBookConfigOverride(book.bookConfig, patch),
+      });
+    },
+    [book.bookConfig, book.id, updateBook, viewSettings]
+  );
+
+  const handleResetViewSettings = useCallback(() => {
+    updateBook(book.id, { bookConfig: undefined });
+  }, [book.id, updateBook]);
+
   const handleChapterNavigate = useCallback(
     async (href: string) => {
       setChapterNavOpen(false);
@@ -118,6 +145,7 @@ export function ReaderPage({ book, onBack }: ReaderPageProps) {
         ref={readerRef}
         filePath={session.filePath}
         lastPosition={session.progress.position}
+        config={effectiveBookConfig}
         onRelocate={handleRelocate}
         onTocLoaded={handleTocLoaded}
         onError={(err) => logError(SOURCE, "阅读器错误", err)}
@@ -144,6 +172,10 @@ export function ReaderPage({ book, onBack }: ReaderPageProps) {
       {/* 排版设置 */}
       <SettingsPanel
         open={settingsOpen}
+        config={effectiveBookConfig}
+        hasOverrides={hasOverrides}
+        onChangeViewSettings={handleChangeViewSettings}
+        onResetViewSettings={handleResetViewSettings}
         onClose={() => setSettingsOpen(false)}
       />
     </div>

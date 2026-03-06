@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import type { BookConfig } from "@/lib/book-config";
 import { fromPdfBookmarks, type BookDocTocItem } from "@/lib/book-doc";
 import { calcRenderWindow } from "@/lib/render-window";
 import { logInfo } from "@/lib/logger";
@@ -15,6 +16,7 @@ import { logInfo } from "@/lib/logger";
 interface PdfReaderViewProps {
   filePath: string;
   lastPosition?: string | null; // page:{pageIndex}
+  config: BookConfig;
   onRelocate?: (position: string, percent: number) => void;
   onChaptersLoaded?: (chapters: BookDocTocItem[]) => void;
   onError?: (error: Error) => void;
@@ -230,7 +232,7 @@ export const PdfPageItem = memo(function PdfPageItem({
 
 export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>(
   function PdfReaderView(
-    { filePath, lastPosition, onRelocate, onChaptersLoaded, onError },
+    { filePath, lastPosition, config: _config, onRelocate, onChaptersLoaded, onError },
     ref
   ) {
     const containerRef = useRef<HTMLDivElement>(null);

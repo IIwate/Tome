@@ -1,9 +1,8 @@
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 import { shallow } from "zustand/shallow";
+import type { BookConfig, Theme, ViewSettings } from "@/lib/book-config";
 import { loadPersistedSettings, persistSettings } from "@/lib/tauri-store";
-
-export type Theme = "light" | "dark" | "sepia";
 export type BookDeleteMode = "library-only" | "library-and-file";
 
 interface SettingsState {
@@ -25,6 +24,7 @@ interface SettingsActions {
   setFontSize: (fontSize: number) => void;
   setLineHeight: (lineHeight: number) => void;
   setMargin: (margin: number) => void;
+  setViewSettings: (patch: Partial<ViewSettings>) => void;
   setBookDeleteSkipConfirm: (skip: boolean) => void;
   setBookDeleteMode: (mode: BookDeleteMode) => void;
   setPdfCacheBaseDir: (pdfCacheBaseDir: string) => void;
@@ -64,6 +64,35 @@ function getPersistedSettingsSnapshot() {
   };
 }
 
+export function getViewSettingsSnapshot(
+  state: Pick<SettingsState, "theme" | "fontFamily" | "fontSize" | "lineHeight" | "margin"> =
+    useSettingsStore.getState()
+): ViewSettings {
+  return {
+    theme: state.theme,
+    fontFamily: state.fontFamily,
+    fontSize: state.fontSize,
+    lineHeight: state.lineHeight,
+    margin: state.margin,
+  };
+}
+
+export function getBookConfigSnapshot(): BookConfig {
+  return {
+    viewSettings: getViewSettingsSnapshot(),
+  };
+}
+
+export function useViewSettings(): ViewSettings {
+  return useSettingsStore((s) => ({
+    theme: s.theme,
+    fontFamily: s.fontFamily,
+    fontSize: s.fontSize,
+    lineHeight: s.lineHeight,
+    margin: s.margin,
+  }));
+}
+
 export const useSettingsStore = create<SettingsState & SettingsActions>()(
   subscribeWithSelector((set) => ({
     ...DEFAULTS,
@@ -74,6 +103,14 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
     setFontSize: (fontSize) => set({ fontSize }),
     setLineHeight: (lineHeight) => set({ lineHeight }),
     setMargin: (margin) => set({ margin }),
+    setViewSettings: (patch) =>
+      set((state) => ({
+        theme: patch.theme ?? state.theme,
+        fontFamily: patch.fontFamily ?? state.fontFamily,
+        fontSize: patch.fontSize ?? state.fontSize,
+        lineHeight: patch.lineHeight ?? state.lineHeight,
+        margin: patch.margin ?? state.margin,
+      })),
     setBookDeleteSkipConfirm: (skip) => set({ bookDeleteSkipConfirm: skip }),
     setBookDeleteMode: (mode) => set({ bookDeleteMode: mode }),
     setPdfCacheBaseDir: (pdfCacheBaseDir) => set({ pdfCacheBaseDir }),

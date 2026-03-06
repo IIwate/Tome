@@ -1,4 +1,5 @@
-import { useSettingsStore, type Theme } from "@/stores/settings";
+import { useSettingsStore } from "@/stores/settings";
+import type { Theme } from "@/lib/book-config";
 import { Sun, Moon, BookOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
 

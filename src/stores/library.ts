@@ -3,6 +3,7 @@ import { subscribeWithSelector } from "zustand/middleware";
 import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import type { BookDocFormat } from "@/lib/book-doc";
+import type { BookConfigOverride } from "@/lib/book-config";
 import { loadImportedDocumentMeta } from "@/lib/document-loader";
 import { loadPersistedSettings, persistSettings } from "@/lib/tauri-store";
 import {
@@ -17,6 +18,7 @@ export interface Book {
   id: string;
   path: string;
   format: BookDocFormat;
+  bookConfig?: BookConfigOverride;
   title: string;
   author: string;
   coverDataUrl: string;

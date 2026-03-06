@@ -1,11 +1,15 @@
 import { useEffect } from "react";
-import { useSettingsStore, type Theme } from "@/stores/settings";
+import type { BookConfig, Theme, ViewSettings } from "@/lib/book-config";
 import { cn } from "@/lib/utils";
 import { X, Sun, Moon, BookOpen } from "lucide-react";
 
 interface SettingsPanelProps {
   open: boolean;
   onClose: () => void;
+  config: BookConfig;
+  onChangeViewSettings: (patch: Partial<ViewSettings>) => void;
+  onResetViewSettings: () => void;
+  hasOverrides: boolean;
 }
 
 const FONT_OPTIONS = [
@@ -73,18 +77,16 @@ function RangeSlider({
   );
 }
 
-export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
-  const theme = useSettingsStore((s) => s.theme);
-  const fontFamily = useSettingsStore((s) => s.fontFamily);
-  const fontSize = useSettingsStore((s) => s.fontSize);
-  const lineHeight = useSettingsStore((s) => s.lineHeight);
-  const margin = useSettingsStore((s) => s.margin);
-
-  const setTheme = useSettingsStore((s) => s.setTheme);
-  const setFontFamily = useSettingsStore((s) => s.setFontFamily);
-  const setFontSize = useSettingsStore((s) => s.setFontSize);
-  const setLineHeight = useSettingsStore((s) => s.setLineHeight);
-  const setMargin = useSettingsStore((s) => s.setMargin);
+export function SettingsPanel({
+  open,
+  onClose,
+  config,
+  onChangeViewSettings,
+  onResetViewSettings,
+  hasOverrides,
+}: SettingsPanelProps) {
+  const { theme, fontFamily, fontSize, lineHeight, margin } =
+    config.viewSettings;
 
   // Esc 关闭
   useEffect(() => {
@@ -114,7 +116,20 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
       >
         {/* 标题栏 */}
         <div className="flex items-center justify-between border-b border-border/50 px-4 py-3">
-          <h3 className="text-sm font-semibold text-foreground">排版设置</h3>
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">排版设置</h3>
+            <p className="text-[11px] text-muted-foreground">仅作用于当前书籍</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {hasOverrides && (
+              <button
+                type="button"
+                onClick={onResetViewSettings}
+                className="rounded-lg border border-border/60 px-2.5 py-1 text-[11px] text-foreground/70 transition-colors hover:bg-accent/60 hover:text-foreground"
+              >
+                恢复默认
+              </button>
+            )}
           <button
             onClick={onClose}
             aria-label="关闭设置"
@@ -122,6 +137,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
           >
             <X className="h-4 w-4" />
           </button>
+          </div>
         </div>
 
         {/* 设置内容 */}
@@ -133,7 +149,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
               {THEMES.map(({ value, label, icon: Icon }) => (
                 <button
                   key={value}
-                  onClick={() => setTheme(value)}
+                  onClick={() => onChangeViewSettings({ theme: value })}
                   className={cn(
                     "flex-1 inline-flex items-center justify-center gap-1 rounded-md px-2 py-1.5 text-xs font-medium transition-all",
                     theme === value
@@ -155,7 +171,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
               {FONT_OPTIONS.map((opt) => (
                 <button
                   key={opt.value}
-                  onClick={() => setFontFamily(opt.value)}
+                  onClick={() => onChangeViewSettings({ fontFamily: opt.value })}
                   className={cn(
                     "rounded-lg px-3 py-2 text-xs font-medium transition-all",
                     fontFamily === opt.value
@@ -178,7 +194,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
             max={32}
             step={2}
             displayValue={`${fontSize}px`}
-            onChange={setFontSize}
+            onChange={(value) => onChangeViewSettings({ fontSize: value })}
           />
 
           {/* 行高 */}
@@ -189,7 +205,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
             max={2.4}
             step={0.2}
             displayValue={lineHeight.toFixed(1)}
-            onChange={setLineHeight}
+            onChange={(value) => onChangeViewSettings({ lineHeight: value })}
           />
 
           {/* 边距 */}
@@ -200,7 +216,7 @@ export function SettingsPanel({ open, onClose }: SettingsPanelProps) {
             max={120}
             step={20}
             displayValue={`${margin}px`}
-            onChange={setMargin}
+            onChange={(value) => onChangeViewSettings({ margin: value })}
           />
         </div>
       </div>

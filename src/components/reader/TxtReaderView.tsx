@@ -6,14 +6,15 @@ import {
   useRef,
   useState,
 } from "react";
+import type { BookConfig } from "@/lib/book-config";
 import { parseTxtFile, type TxtContent } from "@/lib/txt-parser";
 import { fromTxtChapters, type BookDocTocItem } from "@/lib/book-doc";
-import { useSettingsStore } from "@/stores/settings";
 import { logError, logInfo } from "@/lib/logger";
 
 interface TxtReaderViewProps {
   filePath: string;
   lastPosition?: string | null;
+  config: BookConfig;
   onRelocate?: (position: string | null, percent: number) => void;
   onChaptersLoaded?: (chapters: BookDocTocItem[]) => void;
   onError?: (error: Error) => void;
@@ -77,7 +78,7 @@ function buildSegments(content: TxtContent): TextSegment[] {
 
 export const TxtReaderView = forwardRef<TxtReaderViewHandle, TxtReaderViewProps>(
   function TxtReaderView(
-    { filePath, lastPosition, onRelocate, onChaptersLoaded, onError },
+    { filePath, lastPosition, config, onRelocate, onChaptersLoaded, onError },
     ref
   ) {
     const containerRef = useRef<HTMLDivElement>(null);
@@ -87,10 +88,7 @@ export const TxtReaderView = forwardRef<TxtReaderViewHandle, TxtReaderViewProps>
     const progressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const progressPendingRef = useRef(false);
 
-    const fontFamily = useSettingsStore((s) => s.fontFamily);
-    const fontSize = useSettingsStore((s) => s.fontSize);
-    const lineHeight = useSettingsStore((s) => s.lineHeight);
-    const margin = useSettingsStore((s) => s.margin);
+    const { fontFamily, fontSize, lineHeight, margin } = config.viewSettings;
 
     useImperativeHandle(
       ref,
