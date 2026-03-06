@@ -37,15 +37,15 @@ describe("createConcurrencyLimiter", () => {
     expect(maxRunning).toBeLessThanOrEqual(2);
     expect(running).toBe(2);
 
-    ds[0].resolve();
+    ds[0]!.resolve();
     await flushMicrotasks();
     expect(maxRunning).toBeLessThanOrEqual(2);
     expect(running).toBe(2);
 
-    ds[1].resolve();
-    ds[2].resolve();
-    ds[3].resolve();
-    ds[4].resolve();
+    ds[1]!.resolve();
+    ds[2]!.resolve();
+    ds[3]!.resolve();
+    ds[4]!.resolve();
     await Promise.all(ps);
 
     expect(running).toBe(0);
@@ -68,16 +68,16 @@ describe("createConcurrencyLimiter", () => {
     await flushMicrotasks();
     expect(started).toEqual([0]);
 
-    ds[0].resolve();
+    ds[0]!.resolve();
     await flushMicrotasks();
     expect(started).toEqual([0, 1]);
 
-    ds[1].resolve();
+    ds[1]!.resolve();
     await flushMicrotasks();
     expect(started).toEqual([0, 1, 2]);
 
-    ds[2].resolve();
-    ds[3].resolve();
+    ds[2]!.resolve();
+    ds[3]!.resolve();
     await Promise.all(ps);
 
     expect(started).toEqual([0, 1, 2, 3]);

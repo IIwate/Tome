@@ -25,17 +25,74 @@ export interface PdfReaderViewHandle {
   goToPage: (pageIndex: number) => void;
 }
 
-interface PageCache {
-  dataUrl: string | null;
+export interface PageCache {
+  url: string | null;
   height: number | null;
   loading: boolean;
   error: string | null;
 }
 
-function normalizeImageDataUrl(raw: string): string {
-  if (!raw) return "";
-  if (raw.startsWith("data:")) return raw;
-  return `data:image/jpeg;base64,${raw}`;
+export type RenderPageResult =
+  | { kind: "file"; page_index: number; width: number; resource_url: string }
+  | { kind: "data"; page_index: number; width: number; data_url: string };
+
+export interface EvictPdfPageCacheByDistanceOptions {
+  cacheKeys: Iterable<number>;
+  pinned: Iterable<number>;
+  anchors: Iterable<number>;
+  max: number;
+}
+
+export const MAX_CACHED_PAGES = 200;
+
+function distanceToAnchors(pageIndex: number, anchors: readonly number[]): number {
+  if (anchors.length === 0) return 0;
+  return Math.min(...anchors.map((anchor) => Math.abs(anchor - pageIndex)));
+}
+
+export function resolveRenderPageUrl(result: RenderPageResult): string {
+  return result.kind === "file" ? result.resource_url : result.data_url;
+}
+
+export function applyRenderPageResult(
+  cache: PageCache,
+  result: RenderPageResult
+): PageCache {
+  return {
+    ...cache,
+    url: resolveRenderPageUrl(result),
+    loading: false,
+    error: null,
+  };
+}
+
+export function evictPdfPageCacheByDistance({
+  cacheKeys,
+  pinned,
+  anchors,
+  max,
+}: EvictPdfPageCacheByDistanceOptions): Set<number> {
+  const keyList = Array.from(new Set(cacheKeys)).filter((key) =>
+    Number.isInteger(key)
+  );
+  if (keyList.length <= max) return new Set<number>();
+
+  const pinnedSet = new Set(
+    Array.from(new Set(pinned)).filter((key) => Number.isInteger(key))
+  );
+  const anchorList = Array.from(new Set(anchors)).filter((key) =>
+    Number.isInteger(key)
+  );
+  const removable = keyList.filter((key) => !pinnedSet.has(key));
+  const overflow = Math.min(keyList.length - max, removable.length);
+
+  removable.sort((a, b) => {
+    const distDiff = distanceToAnchors(b, anchorList) - distanceToAnchors(a, anchorList);
+    if (distDiff !== 0) return distDiff;
+    return b - a;
+  });
+
+  return new Set(removable.slice(0, overflow));
 }
 
 function toFiniteNumber(v: unknown): number | null {
@@ -90,24 +147,26 @@ const MAX_RENDER_PDF_PAGE_WIDTH = 2000;
 
 interface PdfPageItemProps {
   pageIndex: number;
-  dataUrl: string | null;
+  url: string | null;
   height: number | null;
   loading: boolean;
   error: string | null;
   estimatedHeight: number;
   registerEl: (pageIndex: number, el: HTMLDivElement | null) => void;
   onImageLoaded: (pageIndex: number, img: HTMLImageElement) => void;
+  onImageError: (pageIndex: number) => void;
 }
 
-const PdfPageItem = memo(function PdfPageItem({
+export const PdfPageItem = memo(function PdfPageItem({
   pageIndex,
-  dataUrl,
+  url,
   height,
   loading,
   error,
   estimatedHeight,
   registerEl,
   onImageLoaded,
+  onImageError,
 }: PdfPageItemProps) {
   const setRef = useCallback(
     (el: HTMLDivElement | null) => registerEl(pageIndex, el),
@@ -123,23 +182,36 @@ const PdfPageItem = memo(function PdfPageItem({
       className="mb-6 flex w-full justify-center"
     >
       <div className="w-full">
-        {dataUrl ? (
+        {url ? (
           <img
-            src={dataUrl}
+            src={url}
             alt={`第 ${pageIndex + 1} 页`}
             className="mx-auto block max-w-full"
             style={{ maxWidth: "100%", height: "auto" }}
             onLoad={(e) => onImageLoaded(pageIndex, e.currentTarget)}
+            onError={() => onImageError(pageIndex)}
           />
         ) : (
           <div
-            className="mx-auto w-full rounded-md border border-border bg-muted/10"
+            className="mx-auto flex w-full items-center justify-center"
             style={{ height: placeholderHeight }}
-          />
-        )}
-        {(loading || error) && (
-          <div className="mt-2 text-center text-xs text-muted-foreground">
-            {error ? "渲染失败" : "渲染中…"}
+          >
+            {error ? (
+              <div
+                data-testid="pdf-page-error"
+                className="text-sm text-destructive"
+              >
+                渲染失败
+              </div>
+            ) : loading ? (
+              <div
+                data-testid="pdf-page-loading"
+                className="flex items-center gap-2 text-xs text-muted-foreground"
+              >
+                <div className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" />
+                <span>加载中...</span>
+              </div>
+            ) : null}
           </div>
         )}
       </div>
@@ -237,6 +309,20 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
       [requestRerender]
     );
 
+    const onImageError = useCallback(
+      (pageIndex: number) => {
+        const cache = cacheRef.current.get(pageIndex);
+        if (!cache) return;
+        cache.url = null;
+        cache.loading = false;
+        cache.error = "渲染失败";
+        cacheRef.current.set(pageIndex, cache);
+        requestRerender();
+        onErrorRef.current?.(new Error(`PDF 页面图片加载失败: page=${pageIndex}`));
+      },
+      [requestRerender]
+    );
+
     const ensureRenderPage = useCallback(
       async (pageIndex: number) => {
         const token = fileTokenRef.current;
@@ -244,13 +330,13 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
 
         const map = cacheRef.current;
         const cache: PageCache = map.get(pageIndex) ?? {
-          dataUrl: null,
+          url: null,
           height: null,
           loading: false,
           error: null,
         };
 
-        if (cache.dataUrl || cache.loading) {
+        if (cache.url || cache.loading) {
           map.set(pageIndex, cache);
           return;
         }
@@ -267,22 +353,19 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
             Math.max(1, Math.round(renderWidth)),
             MAX_RENDER_PDF_PAGE_WIDTH
           );
-          const raw = await limit(async () => {
+          const result = await limit(async () => {
             // 切书后：排队中的任务开始执行前直接跳过，避免浪费渲染
             if (fileTokenRef.current !== token) return null;
-            return invoke<string>("render_pdf_page", {
+            return invoke<RenderPageResult>("render_pdf_page", {
               path: filePath,
               pageIndex,
               width,
             });
           });
-          if (raw == null) return;
+          if (result == null) return;
           if (fileTokenRef.current !== token) return;
 
-          const next = map.get(pageIndex) ?? cache;
-          next.dataUrl = normalizeImageDataUrl(raw);
-          next.loading = false;
-          next.error = null;
+          const next = applyRenderPageResult(map.get(pageIndex) ?? cache, result);
           map.set(pageIndex, next);
           requestRerender();
         } catch (err) {
@@ -307,8 +390,6 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
 
       const wanted = new Set<number>();
       const priority = new Set<number>();
-      let minNear = Number.POSITIVE_INFINITY;
-      let maxNear = Number.NEGATIVE_INFINITY;
 
       for (const idx of visiblePagesRef.current) {
         for (let d = -2; d <= 2; d++) {
@@ -318,8 +399,6 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
       }
 
       for (const idx of near) {
-        minNear = Math.min(minNear, idx);
-        maxNear = Math.max(maxNear, idx);
         for (let d = -2; d <= 2; d++) {
           const p = idx + d;
           if (p >= 0 && p < pageCount) wanted.add(p);
@@ -335,21 +414,28 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
         void ensureRenderPage(idx);
       }
 
-      if (!Number.isFinite(minNear) || !Number.isFinite(maxNear)) return;
-
-      const keepMin = Math.max(minNear - 6, 0);
-      const keepMax = Math.min(maxNear + 6, pageCount - 1);
-
       let changed = false;
       const map = cacheRef.current;
-      for (const [i, cache] of map) {
-        if (cache.dataUrl && (i < keepMin || i > keepMax)) {
-          cache.dataUrl = null;
-          cache.loading = false;
-          cache.error = null;
-          map.set(i, cache);
-          changed = true;
-        }
+      const evictKeys = evictPdfPageCacheByDistance({
+        cacheKeys: Array.from(map.entries())
+          .filter(([, cache]) => !!cache.url)
+          .map(([pageIndex]) => pageIndex),
+        pinned: new Set([
+          ...Array.from(nearPagesRef.current),
+          ...Array.from(visiblePagesRef.current),
+        ]),
+        anchors: [scrollAnchorRef.current, ...Array.from(visiblePagesRef.current)],
+        max: MAX_CACHED_PAGES,
+      });
+
+      for (const i of evictKeys) {
+        const cache = map.get(i);
+        if (!cache?.url) continue;
+        cache.url = null;
+        cache.loading = false;
+        cache.error = null;
+        map.set(i, cache);
+        changed = true;
       }
       if (changed) requestRerender();
     }, [ensureRenderPage, pageCount, requestRerender]);
@@ -746,13 +832,14 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
                     <PdfPageItem
                       key={i}
                       pageIndex={i}
-                      dataUrl={cache?.dataUrl ?? null}
+                      url={cache?.url ?? null}
                       height={cache?.height ?? null}
                       loading={cache?.loading ?? false}
                       error={cache?.error ?? null}
                       estimatedHeight={estimatedHeight}
                       registerEl={registerEl}
                       onImageLoaded={onImageLoaded}
+                      onImageError={onImageError}
                     />
                   );
                 })}

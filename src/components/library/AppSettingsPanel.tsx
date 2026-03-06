@@ -1,13 +1,46 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
-import { useSettingsStore, type BookDeleteMode } from "@/stores/settings";
+import {
+  useCallback,
+  useEffect,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { invoke } from "@tauri-apps/api/core";
+import {
+  flushSettingsPersist,
+  useSettingsStore,
+  type BookDeleteMode,
+} from "@/stores/settings";
 import { cn } from "@/lib/utils";
 import { logger } from "@/lib/logger";
 import { DebugLogDialog } from "./DebugLogDialog";
-import { X, Trash2, FileX2 } from "lucide-react";
+import {
+  FileX2,
+  FolderOpen,
+  RefreshCcw,
+  Trash2,
+  X,
+} from "lucide-react";
 
 interface AppSettingsPanelProps {
   open: boolean;
   onClose: () => void;
+}
+
+interface PdfCacheConfig {
+  base_dir: string;
+  effective_dir: string;
+  using_default: boolean;
+}
+
+interface PdfCacheValidateResult {
+  effective_dir: string;
+}
+
+interface PdfCacheStats {
+  effective_dir: string;
+  file_count: number;
+  total_bytes: number;
 }
 
 const FONT_OPTIONS = [
@@ -43,6 +76,19 @@ const DELETE_MODES: {
 /** 将浮点值归一化到最近的步进值 */
 function snapToStep(value: number, min: number, step: number): number {
   return Math.round((value - min) / step) * step + min;
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  const fixed = value >= 100 || unitIndex === 0 ? 0 : 1;
+  return `${value.toFixed(fixed)} ${units[unitIndex]}`;
 }
 
 function RangeSlider({
@@ -97,6 +143,7 @@ export function AppSettingsPanel({ open, onClose }: AppSettingsPanelProps) {
   const fontSize = useSettingsStore((s) => s.fontSize);
   const lineHeight = useSettingsStore((s) => s.lineHeight);
   const margin = useSettingsStore((s) => s.margin);
+  const pdfCacheBaseDir = useSettingsStore((s) => s.pdfCacheBaseDir);
   const bookDeleteSkipConfirm = useSettingsStore(
     (s) => s.bookDeleteSkipConfirm
   );
@@ -107,6 +154,7 @@ export function AppSettingsPanel({ open, onClose }: AppSettingsPanelProps) {
   const setFontSize = useSettingsStore((s) => s.setFontSize);
   const setLineHeight = useSettingsStore((s) => s.setLineHeight);
   const setMargin = useSettingsStore((s) => s.setMargin);
+  const setPdfCacheBaseDir = useSettingsStore((s) => s.setPdfCacheBaseDir);
   const setBookDeleteSkipConfirm = useSettingsStore(
     (s) => s.setBookDeleteSkipConfirm
   );
@@ -114,6 +162,11 @@ export function AppSettingsPanel({ open, onClose }: AppSettingsPanelProps) {
   const setDebugMode = useSettingsStore((s) => s.setDebugMode);
 
   const [logDialogOpen, setLogDialogOpen] = useState(false);
+  const [cacheConfig, setCacheConfig] = useState<PdfCacheConfig | null>(null);
+  const [cacheStats, setCacheStats] = useState<PdfCacheStats | null>(null);
+  const [cacheBusy, setCacheBusy] = useState(false);
+  const [cacheError, setCacheError] = useState<string | null>(null);
+
   const logEntries = useSyncExternalStore(
     logger.subscribe,
     logger.getEntries,
@@ -121,9 +174,91 @@ export function AppSettingsPanel({ open, onClose }: AppSettingsPanelProps) {
   );
   const logEntryCount = logEntries.length;
 
+  const refreshPdfCacheInfo = useCallback(async () => {
+    setCacheBusy(true);
+    try {
+      const [config, stats] = await Promise.all([
+        invoke<PdfCacheConfig>("pdf_cache_get_config"),
+        invoke<PdfCacheStats>("pdf_cache_get_stats"),
+      ]);
+      setCacheConfig(config);
+      setCacheStats(stats);
+      setCacheError(null);
+    } catch (err) {
+      setCacheError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCacheBusy(false);
+    }
+  }, []);
+
+  const handleSelectPdfCacheDir = useCallback(async () => {
+    const selected = await openDialog({ directory: true });
+    if (!selected || Array.isArray(selected)) return;
+
+    setCacheBusy(true);
+    try {
+      const result = await invoke<PdfCacheValidateResult>("pdf_cache_validate_dir", {
+        dir: selected,
+      });
+      setPdfCacheBaseDir(selected);
+      await flushSettingsPersist();
+      setCacheConfig({
+        base_dir: selected,
+        effective_dir: result.effective_dir,
+        using_default: false,
+      });
+      setCacheError(null);
+      await refreshPdfCacheInfo();
+    } catch (err) {
+      setCacheError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCacheBusy(false);
+    }
+  }, [refreshPdfCacheInfo, setPdfCacheBaseDir]);
+
+  const handleUseDefaultPdfCacheDir = useCallback(async () => {
+    setCacheBusy(true);
+    try {
+      const result = await invoke<PdfCacheValidateResult>("pdf_cache_validate_dir", {
+        dir: "",
+      });
+      setPdfCacheBaseDir("");
+      await flushSettingsPersist();
+      setCacheConfig({
+        base_dir: "",
+        effective_dir: result.effective_dir,
+        using_default: true,
+      });
+      setCacheError(null);
+      await refreshPdfCacheInfo();
+    } catch (err) {
+      setCacheError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCacheBusy(false);
+    }
+  }, [refreshPdfCacheInfo, setPdfCacheBaseDir]);
+
+  const handleClearPdfCache = useCallback(async () => {
+    setCacheBusy(true);
+    try {
+      await invoke("pdf_cache_clear");
+      setCacheError(null);
+      await refreshPdfCacheInfo();
+    } catch (err) {
+      setCacheError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCacheBusy(false);
+    }
+  }, [refreshPdfCacheInfo]);
+
   useEffect(() => {
-    if (!open) setLogDialogOpen(false);
-  }, [open]);
+    if (!open) {
+      setLogDialogOpen(false);
+      setCacheError(null);
+      return;
+    }
+    void refreshPdfCacheInfo();
+  }, [open, refreshPdfCacheInfo]);
 
   useEffect(() => {
     if (!debugMode) {
@@ -131,7 +266,6 @@ export function AppSettingsPanel({ open, onClose }: AppSettingsPanelProps) {
     }
   }, [debugMode]);
 
-  // Esc 关闭：优先关闭日志弹窗
   useEffect(() => {
     if (!open) return;
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -150,39 +284,33 @@ export function AppSettingsPanel({ open, onClose }: AppSettingsPanelProps) {
 
   return (
     <>
-      {/* 遮罩层 */}
       <div
         className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[2px] animate-in fade-in duration-200"
         onClick={onClose}
       />
-      {/* 右侧面板 */}
       <div
         role="dialog"
         aria-modal="true"
         aria-label="应用设置"
         className="fixed right-0 top-0 z-50 flex h-full w-72 flex-col border-l border-border/50 bg-card/80 shadow-2xl backdrop-blur-xl animate-in slide-in-from-right duration-200"
       >
-        {/* 标题栏 */}
         <div className="flex items-center justify-between border-b border-border/50 px-4 py-3">
           <h3 className="text-sm font-semibold text-foreground">设置</h3>
           <button
             onClick={onClose}
             aria-label="关闭设置"
-            className="rounded-lg p-1 text-foreground/60 hover:bg-accent hover:text-foreground transition-colors"
+            className="rounded-lg p-1 text-foreground/60 transition-colors hover:bg-accent hover:text-foreground"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        {/* 设置内容 */}
-        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-6">
-          {/* 阅读默认值 */}
+        <div className="flex-1 space-y-6 overflow-y-auto px-4 py-4">
           <div className="space-y-4">
             <span className="text-xs font-medium text-foreground">
               阅读默认值
             </span>
 
-            {/* 字体 */}
             <div className="space-y-2">
               <span className="text-xs text-muted-foreground">字体</span>
               <div className="grid grid-cols-2 gap-1.5">
@@ -204,7 +332,6 @@ export function AppSettingsPanel({ open, onClose }: AppSettingsPanelProps) {
               </div>
             </div>
 
-            {/* 字号 */}
             <RangeSlider
               label="字号"
               value={fontSize}
@@ -215,7 +342,6 @@ export function AppSettingsPanel({ open, onClose }: AppSettingsPanelProps) {
               onChange={setFontSize}
             />
 
-            {/* 行高 */}
             <RangeSlider
               label="行高"
               value={lineHeight}
@@ -226,7 +352,6 @@ export function AppSettingsPanel({ open, onClose }: AppSettingsPanelProps) {
               onChange={setLineHeight}
             />
 
-            {/* 边距 */}
             <RangeSlider
               label="边距"
               value={margin}
@@ -238,13 +363,11 @@ export function AppSettingsPanel({ open, onClose }: AppSettingsPanelProps) {
             />
           </div>
 
-          {/* 删除行为 */}
           <div className="space-y-2">
             <span className="text-xs font-medium text-foreground">
               删除设置
             </span>
 
-            {/* 删除模式 */}
             <div className="grid gap-1.5">
               {DELETE_MODES.map(
                 ({ value, label, desc, icon: Icon, activeClass }) => (
@@ -270,7 +393,6 @@ export function AppSettingsPanel({ open, onClose }: AppSettingsPanelProps) {
               )}
             </div>
 
-            {/* 跳过确认 */}
             <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground/80">
               <input
                 type="checkbox"
@@ -282,9 +404,88 @@ export function AppSettingsPanel({ open, onClose }: AppSettingsPanelProps) {
             </label>
           </div>
 
-          {/* 高级 */}
           <div className="space-y-2">
             <span className="text-xs font-medium text-foreground">高级</span>
+
+            <div className="space-y-2 rounded-lg border border-border/60 bg-background/80 p-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0 space-y-1">
+                  <p className="text-xs font-medium text-foreground">
+                    PDF 缓存目录
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {cacheConfig?.using_default
+                      ? "当前使用系统默认缓存目录"
+                      : "当前使用自定义缓存基目录"}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void refreshPdfCacheInfo()}
+                  disabled={cacheBusy}
+                  className="inline-flex items-center gap-1 rounded-md border border-border/60 px-2 py-1 text-[11px] text-foreground/80 transition-colors hover:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <RefreshCcw
+                    className={cn("h-3 w-3", cacheBusy && "animate-spin")}
+                  />
+                  刷新
+                </button>
+              </div>
+
+              <div className="rounded-md border border-border/50 bg-muted/20 px-2.5 py-2">
+                <p className="break-all text-[11px] text-foreground/80">
+                  {cacheConfig?.effective_dir ?? "正在读取缓存目录..."}
+                </p>
+                {pdfCacheBaseDir && (
+                  <p className="mt-1 break-all text-[11px] text-muted-foreground">
+                    基目录：{pdfCacheBaseDir}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                <span>缓存大小</span>
+                <span>
+                  {cacheStats
+                    ? `${formatBytes(cacheStats.total_bytes)} · ${cacheStats.file_count} 个文件`
+                    : "正在读取..."}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => void handleSelectPdfCacheDir()}
+                  disabled={cacheBusy}
+                  className="inline-flex items-center justify-center gap-1 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs font-medium text-foreground/80 transition-colors hover:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <FolderOpen className="h-3.5 w-3.5" />
+                  选择目录
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleUseDefaultPdfCacheDir()}
+                  disabled={cacheBusy}
+                  className="rounded-lg border border-border/60 bg-background px-3 py-2 text-xs font-medium text-foreground/80 transition-colors hover:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  使用默认
+                </button>
+              </div>
+
+              {cacheError && (
+                <p className="text-[11px] text-destructive">{cacheError}</p>
+              )}
+
+              <button
+                type="button"
+                onClick={() => void handleClearPdfCache()}
+                disabled={cacheBusy}
+                className="inline-flex w-full items-center justify-center gap-1 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs font-medium text-foreground/80 transition-colors hover:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                清除缓存
+              </button>
+            </div>
 
             <div className="space-y-1">
               <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground/80">
@@ -321,3 +522,4 @@ export function AppSettingsPanel({ open, onClose }: AppSettingsPanelProps) {
     </>
   );
 }
+

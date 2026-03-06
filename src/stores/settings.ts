@@ -16,6 +16,7 @@ interface SettingsState {
   bookDeleteSkipConfirm: boolean;
   bookDeleteMode: BookDeleteMode;
   debugMode: boolean;
+  pdfCacheBaseDir: string;
   _hydrated: boolean;
 }
 
@@ -28,6 +29,7 @@ interface SettingsActions {
   setBookDeleteSkipConfirm: (skip: boolean) => void;
   setBookDeleteMode: (mode: BookDeleteMode) => void;
   setDebugMode: (debugMode: boolean) => void;
+  setPdfCacheBaseDir: (pdfCacheBaseDir: string) => void;
   hydrate: () => Promise<void>;
 }
 
@@ -40,10 +42,27 @@ const DEFAULTS: Omit<SettingsState, "_hydrated"> = {
   bookDeleteSkipConfirm: false,
   bookDeleteMode: "library-only",
   debugMode: false,
+  pdfCacheBaseDir: "",
 };
 
 function applyTheme(theme: Theme) {
+  if (typeof document === "undefined") return;
   document.documentElement.setAttribute("data-theme", theme);
+}
+
+function getPersistedSettingsSnapshot() {
+  const state = useSettingsStore.getState();
+  return {
+    theme: state.theme,
+    fontFamily: state.fontFamily,
+    fontSize: state.fontSize,
+    lineHeight: state.lineHeight,
+    margin: state.margin,
+    bookDeleteSkipConfirm: state.bookDeleteSkipConfirm,
+    bookDeleteMode: state.bookDeleteMode,
+    debugMode: state.debugMode,
+    pdfCacheBaseDir: state.pdfCacheBaseDir,
+  };
 }
 
 export const useSettingsStore = create<SettingsState & SettingsActions>()(
@@ -59,6 +78,7 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
     setBookDeleteSkipConfirm: (skip) => set({ bookDeleteSkipConfirm: skip }),
     setBookDeleteMode: (mode) => set({ bookDeleteMode: mode }),
     setDebugMode: (debugMode) => set({ debugMode }),
+    setPdfCacheBaseDir: (pdfCacheBaseDir) => set({ pdfCacheBaseDir }),
 
     hydrate: async () => {
       const persisted = await loadPersistedSettings(DEFAULTS);
@@ -91,6 +111,15 @@ useSettingsStore.subscribe(
 // 设置变更时自动持久化（shallow 比较避免无变更触发）
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
+export async function flushSettingsPersist() {
+  if (!useSettingsStore.getState()._hydrated) return;
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+  await persistSettings(getPersistedSettingsSnapshot());
+}
+
 useSettingsStore.subscribe(
   (s) => ({
     theme: s.theme,
@@ -101,12 +130,13 @@ useSettingsStore.subscribe(
     bookDeleteSkipConfirm: s.bookDeleteSkipConfirm,
     bookDeleteMode: s.bookDeleteMode,
     debugMode: s.debugMode,
+    pdfCacheBaseDir: s.pdfCacheBaseDir,
   }),
-  (settings) => {
+  () => {
     if (!useSettingsStore.getState()._hydrated) return;
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
-      persistSettings(settings);
+      void persistSettings(getPersistedSettingsSnapshot());
     }, 500);
   },
   { equalityFn: shallow }

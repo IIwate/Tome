@@ -24,3 +24,5 @@ regex = "1"
 pdfium-render = { version = "0.8", features = ["sync"] }
 image = "0.25"
 base64 = "0.22"
+blake3 = "1"
+http = "1"
