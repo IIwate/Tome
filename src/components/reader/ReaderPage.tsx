@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { EpubScrollView, type EpubScrollViewHandle } from "./EpubScrollView";
-import { TxtReaderView, type TxtReaderViewHandle } from "./TxtReaderView";
-import { PdfReaderView, type PdfReaderViewHandle } from "./PdfReaderView";
+import {
+  getReaderAdapterComponent,
+  type ReaderAdapterHandle,
+} from "./ReaderAdapter";
 import { ControlOverlay } from "./ControlOverlay";
 import { ChapterNav } from "./ChapterNav";
 import { SettingsPanel } from "./SettingsPanel";
 import { useLibraryStore, type Book } from "@/stores/library";
 import { useReaderStore } from "@/stores/reader";
 import {
+  createDocumentSession,
   createBookDocShell,
   type BookDocTocItem,
   type BookDoc,
@@ -34,6 +36,17 @@ export function ReaderPage({ book, onBack }: ReaderPageProps) {
     author: book.author,
     toc: chapters,
   });
+  const session = createDocumentSession({
+    id: book.id,
+    format: book.format,
+    filePath: book.path,
+    progress: {
+      position: book.progress.position,
+      percent: book.progress.percent,
+    },
+    doc: currentBookDoc,
+  });
+  const ReaderAdapter = getReaderAdapterComponent(session.format);
 
   const lastBookProgressRef = useRef({
     position: book.progress.position,
@@ -64,9 +77,7 @@ export function ReaderPage({ book, onBack }: ReaderPageProps) {
   const [chapterNavOpen, setChapterNavOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  const readerRef = useRef<EpubScrollViewHandle>(null);
-  const txtReaderRef = useRef<TxtReaderViewHandle>(null);
-  const pdfReaderRef = useRef<PdfReaderViewHandle>(null);
+  const readerRef = useRef<ReaderAdapterHandle>(null);
 
   const handleRelocate = useCallback(
     (position: string | null, percent: number) => {
@@ -95,56 +106,28 @@ export function ReaderPage({ book, onBack }: ReaderPageProps) {
   const handleChapterNavigate = useCallback(
     async (href: string) => {
       setChapterNavOpen(false);
-      if (book.format === "txt") {
-        const offset = parseInt(href, 10);
-        if (!isNaN(offset)) txtReaderRef.current?.scrollToOffset(offset);
-      } else if (book.format === "pdf") {
-        const pageIndex = parseInt(href, 10);
-        if (!isNaN(pageIndex)) pdfReaderRef.current?.goToPage(pageIndex);
-      } else {
-        await readerRef.current?.goTo(href);
-      }
+      await readerRef.current?.navigateTo(href);
     },
-    [book.format]
+    []
   );
 
   return (
     <div className="relative h-full overflow-hidden">
       {/* 阅读区域（全屏） */}
-      {book.format === "epub" ? (
-        <EpubScrollView
-          ref={readerRef}
-          filePath={book.path}
-          lastPosition={book.progress.position}
-          onRelocate={handleRelocate}
-          onTocLoaded={handleTocLoaded}
-          onError={(err) => logError(SOURCE, "阅读器错误", err)}
-        />
-      ) : book.format === "pdf" ? (
-        <PdfReaderView
-          ref={pdfReaderRef}
-          filePath={book.path}
-          lastPosition={book.progress.position}
-          onRelocate={handleRelocate}
-          onChaptersLoaded={handleTocLoaded}
-          onError={(err) => logError(SOURCE, "阅读器错误", err)}
-        />
-      ) : (
-        <TxtReaderView
-          ref={txtReaderRef}
-          filePath={book.path}
-          lastPosition={book.progress.position}
-          onRelocate={handleRelocate}
-          onChaptersLoaded={handleTocLoaded}
-          onError={(err) => logError(SOURCE, "阅读器错误", err)}
-        />
-      )}
+      <ReaderAdapter
+        ref={readerRef}
+        filePath={session.filePath}
+        lastPosition={session.progress.position}
+        onRelocate={handleRelocate}
+        onTocLoaded={handleTocLoaded}
+        onError={(err) => logError(SOURCE, "阅读器错误", err)}
+      />
 
       {/* 浮动控制层 */}
       <ControlOverlay
-        title={book.title}
+        title={session.doc.metadata.title}
         percent={percent}
-        hasChapters={currentBookDoc.toc.length > 0}
+        hasChapters={session.doc.toc.length > 0}
         onBack={handleBack}
         onOpenChapters={() => setChapterNavOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
@@ -152,7 +135,7 @@ export function ReaderPage({ book, onBack }: ReaderPageProps) {
 
       {/* 章节导航 */}
       <ChapterNav
-        toc={currentBookDoc.toc}
+        toc={session.doc.toc}
         open={chapterNavOpen}
         onClose={() => setChapterNavOpen(false)}
         onNavigate={handleChapterNavigate}

@@ -28,6 +28,14 @@ export interface BookReadingProgress {
   percent: number;
 }
 
+export interface DocumentSession {
+  id: string;
+  format: BookDocFormat;
+  filePath: string;
+  progress: BookReadingProgress;
+  doc: BookDoc;
+}
+
 export interface BookDoc {
   format: BookDocFormat;
   metadata: BookDocMetadata;
@@ -97,5 +105,21 @@ export function createBookDocShell(input: {
         ? { layout: "pre-paginated" }
         : { layout: "reflowable" },
     toc: input.toc ?? [],
+  };
+}
+
+export function createDocumentSession(input: {
+  id: string;
+  format: BookDocFormat;
+  filePath: string;
+  progress: BookReadingProgress;
+  doc: BookDoc;
+}): DocumentSession {
+  return {
+    id: input.id,
+    format: input.format,
+    filePath: input.filePath,
+    progress: input.progress,
+    doc: input.doc,
   };
 }
