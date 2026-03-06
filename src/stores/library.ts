@@ -2,14 +2,12 @@ import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 import { open } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
+import type { BookDocFormat } from "@/lib/book-doc";
+import { loadImportedDocumentMeta } from "@/lib/document-loader";
 import { loadPersistedSettings, persistSettings } from "@/lib/tauri-store";
-import { extractEpubMeta } from "@/lib/epub-meta";
-import { extractPdfMeta } from "@/lib/pdf-meta";
-import { generateTxtCover } from "@/lib/cover-gen";
 import {
   normalizePath,
   filenameFromPath,
-  parseTxtFilename,
 } from "@/lib/parse-utils";
 import { logError, logInfo } from "@/lib/logger";
 
@@ -18,7 +16,7 @@ const SOURCE = "stores/library";
 export interface Book {
   id: string;
   path: string;
-  format: "epub" | "txt" | "pdf";
+  format: BookDocFormat;
   title: string;
   author: string;
   coverDataUrl: string;
@@ -59,41 +57,17 @@ async function importSingleFile(
   filePath: string,
   fileSize?: number
 ): Promise<Book> {
-  const ext = filePath.toLowerCase().split(".").pop();
-  const format: Book["format"] =
-    ext === "epub" ? "epub" : ext === "pdf" ? "pdf" : "txt";
-
   const size =
     fileSize ?? (await invoke<number>("stat_file", { path: filePath }));
-
-  let title = filenameFromPath(filePath);
-  let author = "";
-  let coverDataUrl = "";
-
-  if (format === "epub") {
-    const bytes = await invoke<ArrayBuffer>("read_file_bytes", {
-      path: filePath,
-    });
-    const meta = extractEpubMeta(new Uint8Array(bytes));
-    title = meta.title;
-    author = meta.author;
-    coverDataUrl = meta.coverDataUrl;
-  } else if (format === "pdf") {
-    const meta = await extractPdfMeta(filePath);
-    title = meta.title;
-    author = meta.author;
-    coverDataUrl = meta.coverDataUrl || generateTxtCover(title);
-  } else {
-    const parsed = parseTxtFilename(title);
-    title = parsed.title;
-    author = parsed.author;
-    coverDataUrl = generateTxtCover(title);
-  }
+  const imported = await loadImportedDocumentMeta(filePath);
+  const title = imported.metadata.title || filenameFromPath(filePath);
+  const author = imported.metadata.author ?? "";
+  const coverDataUrl = imported.coverDataUrl;
 
   return {
     id: crypto.randomUUID(),
     path: filePath,
-    format,
+    format: imported.format,
     title,
     author,
     coverDataUrl,

@@ -1,9 +1,9 @@
 import { useCallback } from "react";
 import { X } from "lucide-react";
-import type { FoliateTocItem } from "@/lib/foliate";
+import type { BookDocTocItem } from "@/lib/book-doc";
 
 interface ChapterNavProps {
-  toc: FoliateTocItem[];
+  toc: BookDocTocItem[];
   open: boolean;
   onClose: () => void;
   onNavigate: (href: string) => void;
@@ -14,7 +14,7 @@ function TocItem({
   depth,
   onNavigate,
 }: {
-  item: FoliateTocItem;
+  item: BookDocTocItem;
   depth: number;
   onNavigate: (href: string) => void;
 }) {

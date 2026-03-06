@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { FoliateTocItem } from "@/lib/foliate";
+import type { BookDocTocItem } from "@/lib/book-doc";
 
 interface ReaderState {
   /** 当前阅读的书籍 ID */
@@ -9,13 +9,13 @@ interface ReaderState {
   /** 阅读进度百分比 0-100 */
   percent: number;
   /** 章节目录（统一格式） */
-  chapters: FoliateTocItem[];
+  chapters: BookDocTocItem[];
 }
 
 interface ReaderActions {
   openBook: (bookId: string, position: string | null, percent: number) => void;
   updateProgress: (position: string | null, percent: number) => void;
-  setChapters: (chapters: FoliateTocItem[]) => void;
+  setChapters: (chapters: BookDocTocItem[]) => void;
   closeBook: () => void;
 }
 

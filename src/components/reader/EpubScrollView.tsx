@@ -11,9 +11,8 @@ import {
   fetchSectionHtml,
   injectShadowStyles,
   type ParsedEpub,
-  type FoliateLocation,
-  type FoliateTocItem,
 } from "@/lib/foliate";
+import { fromFoliateToc, type BookDocTocItem } from "@/lib/book-doc";
 import { useSettingsStore } from "@/stores/settings";
 import { logError, logInfo } from "@/lib/logger";
 
@@ -22,8 +21,8 @@ import { logError, logInfo } from "@/lib/logger";
 interface EpubScrollViewProps {
   filePath: string;
   lastPosition?: string | null;
-  onRelocate?: (location: FoliateLocation) => void;
-  onTocLoaded?: (toc: FoliateTocItem[]) => void;
+  onRelocate?: (position: string | null, percent: number) => void;
+  onTocLoaded?: (toc: BookDocTocItem[]) => void;
   onError?: (error: Error) => void;
 }
 
@@ -252,7 +251,7 @@ export const EpubScrollView = forwardRef<
 
         // 5. 通知 TOC
         if (book.toc) {
-          onTocLoaded?.(book.toc);
+          onTocLoaded?.(fromFoliateToc(book.toc));
         }
 
         // 6. 逐章加载并注入 Shadow DOM
@@ -389,11 +388,10 @@ export const EpubScrollView = forwardRef<
       const scrollPos = Math.min(scrollTop, effectiveMax);
       const fraction = effectiveMax > 0 ? scrollPos / effectiveMax : 0;
 
-      onRelocateRef.current?.({
-        fraction,
-        // sectionIndex 当前未用于恢复，避免滚动中频繁 layout 测量；保留 3 段格式兼容旧数据
-        cfi: `scroll:0:${fraction.toFixed(6)}`,
-      });
+      onRelocateRef.current?.(
+        `scroll:0:${fraction.toFixed(6)}`,
+        Math.round(fraction * 100)
+      );
     };
 
     const requestFlush = () => {

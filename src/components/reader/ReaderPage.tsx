@@ -7,9 +7,13 @@ import { ChapterNav } from "./ChapterNav";
 import { SettingsPanel } from "./SettingsPanel";
 import { useLibraryStore, type Book } from "@/stores/library";
 import { useReaderStore } from "@/stores/reader";
+import {
+  createBookDocShell,
+  type BookDocTocItem,
+  type BookDoc,
+  type BookReadingProgress,
+} from "@/lib/book-doc";
 import { logError } from "@/lib/logger";
-import type { FoliateLocation, FoliateTocItem } from "@/lib/foliate";
-import type { TxtChapter } from "@/lib/txt-parser";
 
 interface ReaderPageProps {
   book: Book;
@@ -24,6 +28,12 @@ export function ReaderPage({ book, onBack }: ReaderPageProps) {
   const setChapters = useReaderStore((s) => s.setChapters);
   const chapters = useReaderStore((s) => s.chapters);
   const percent = useReaderStore((s) => s.percent);
+  const currentBookDoc: BookDoc = createBookDocShell({
+    format: book.format,
+    title: book.title,
+    author: book.author,
+    toc: chapters,
+  });
 
   const lastBookProgressRef = useRef({
     position: book.progress.position,
@@ -59,39 +69,10 @@ export function ReaderPage({ book, onBack }: ReaderPageProps) {
   const pdfReaderRef = useRef<PdfReaderViewHandle>(null);
 
   const handleRelocate = useCallback(
-    (location: FoliateLocation) => {
-      const pos = location.cfi ?? null;
-      const pct = Math.round((location.fraction ?? 0) * 100);
-      lastBookProgressRef.current = { position: pos, percent: pct };
-      if (
-        !bookProgressDirtyRef.current &&
-        (pos !== book.progress.position || pct !== book.progress.percent)
-      ) {
-        bookProgressDirtyRef.current = true;
-      }
-      updateProgress(pos, pct);
-    },
-    [book.progress.percent, book.progress.position, updateProgress]
-  );
-
-  const handleTxtRelocate = useCallback(
-    (charOffset: number, pct: number) => {
-      const pos = charOffset.toString();
-      lastBookProgressRef.current = { position: pos, percent: pct };
-      if (
-        !bookProgressDirtyRef.current &&
-        (pos !== book.progress.position || pct !== book.progress.percent)
-      ) {
-        bookProgressDirtyRef.current = true;
-      }
-      updateProgress(pos, pct);
-    },
-    [book.progress.percent, book.progress.position, updateProgress]
-  );
-
-  const handlePdfRelocate = useCallback(
-    (position: string, pct: number) => {
-      const pos = position ?? null;
+    (position: string | null, percent: number) => {
+      const next: BookReadingProgress = { position, percent };
+      const pos = next.position;
+      const pct = next.percent;
       lastBookProgressRef.current = { position: pos, percent: pct };
       if (
         !bookProgressDirtyRef.current &&
@@ -105,20 +86,8 @@ export function ReaderPage({ book, onBack }: ReaderPageProps) {
   );
 
   const handleTocLoaded = useCallback(
-    (items: FoliateTocItem[]) => {
+    (items: BookDocTocItem[]) => {
       setChapters(items);
-    },
-    [setChapters]
-  );
-
-  const handleTxtChaptersLoaded = useCallback(
-    (txtChapters: TxtChapter[]) => {
-      setChapters(
-        txtChapters.map((ch) => ({
-          label: ch.title,
-          href: ch.startOffset.toString(),
-        }))
-      );
     },
     [setChapters]
   );
@@ -156,7 +125,7 @@ export function ReaderPage({ book, onBack }: ReaderPageProps) {
           ref={pdfReaderRef}
           filePath={book.path}
           lastPosition={book.progress.position}
-          onRelocate={handlePdfRelocate}
+          onRelocate={handleRelocate}
           onChaptersLoaded={handleTocLoaded}
           onError={(err) => logError(SOURCE, "阅读器错误", err)}
         />
@@ -165,8 +134,8 @@ export function ReaderPage({ book, onBack }: ReaderPageProps) {
           ref={txtReaderRef}
           filePath={book.path}
           lastPosition={book.progress.position}
-          onRelocate={handleTxtRelocate}
-          onChaptersLoaded={handleTxtChaptersLoaded}
+          onRelocate={handleRelocate}
+          onChaptersLoaded={handleTocLoaded}
           onError={(err) => logError(SOURCE, "阅读器错误", err)}
         />
       )}
@@ -175,7 +144,7 @@ export function ReaderPage({ book, onBack }: ReaderPageProps) {
       <ControlOverlay
         title={book.title}
         percent={percent}
-        hasChapters={chapters.length > 0}
+        hasChapters={currentBookDoc.toc.length > 0}
         onBack={handleBack}
         onOpenChapters={() => setChapterNavOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
@@ -183,7 +152,7 @@ export function ReaderPage({ book, onBack }: ReaderPageProps) {
 
       {/* 章节导航 */}
       <ChapterNav
-        toc={chapters}
+        toc={currentBookDoc.toc}
         open={chapterNavOpen}
         onClose={() => setChapterNavOpen(false)}
         onNavigate={handleChapterNavigate}

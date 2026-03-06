@@ -8,7 +8,7 @@ import {
   useState,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { FoliateTocItem } from "@/lib/foliate";
+import { fromPdfBookmarks, type BookDocTocItem } from "@/lib/book-doc";
 import { calcRenderWindow } from "@/lib/render-window";
 import { logInfo } from "@/lib/logger";
 
@@ -16,7 +16,7 @@ interface PdfReaderViewProps {
   filePath: string;
   lastPosition?: string | null; // page:{pageIndex}
   onRelocate?: (position: string, percent: number) => void;
-  onChaptersLoaded?: (chapters: FoliateTocItem[]) => void;
+  onChaptersLoaded?: (chapters: BookDocTocItem[]) => void;
   onError?: (error: Error) => void;
 }
 
@@ -132,28 +132,6 @@ function toFiniteNumber(v: unknown): number | null {
     if (Number.isFinite(n)) return n;
   }
   return null;
-}
-
-function bookmarkToTocItem(node: unknown): FoliateTocItem | null {
-  if (!node || typeof node !== "object") return null;
-  const obj = node as Record<string, unknown>;
-  const title = typeof obj.title === "string" ? obj.title : "";
-  const pageIndex =
-    toFiniteNumber(obj.page_index ?? obj.pageIndex ?? obj.page) ?? 0;
-
-  const rawChildren = obj.children ?? obj.subitems ?? obj.items;
-  const children = Array.isArray(rawChildren) ? rawChildren : [];
-  const subitems = children
-    .map(bookmarkToTocItem)
-    .filter((x): x is FoliateTocItem => !!x);
-
-  const idx = Math.max(0, Math.floor(pageIndex));
-  const item: FoliateTocItem = {
-    label: title || `第 ${idx + 1} 页`,
-    href: idx.toString(),
-  };
-  if (subitems.length > 0) item.subitems = subitems;
-  return item;
 }
 
 function clampInt(n: number, min: number, max: number): number {
@@ -691,9 +669,7 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
           setPageCount(pc);
 
           const bookmarks = Array.isArray(info.bookmarks) ? info.bookmarks : [];
-          const toc = bookmarks
-            .map(bookmarkToTocItem)
-            .filter((x): x is FoliateTocItem => !!x);
+          const toc = fromPdfBookmarks(bookmarks);
           onChaptersLoaded?.(toc);
           logInfo(SOURCE, "PDF 加载成功", { pageCount: pc });
         } catch (err) {

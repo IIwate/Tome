@@ -6,15 +6,16 @@ import {
   useRef,
   useState,
 } from "react";
-import { parseTxtFile, type TxtChapter, type TxtContent } from "@/lib/txt-parser";
+import { parseTxtFile, type TxtContent } from "@/lib/txt-parser";
+import { fromTxtChapters, type BookDocTocItem } from "@/lib/book-doc";
 import { useSettingsStore } from "@/stores/settings";
 import { logError, logInfo } from "@/lib/logger";
 
 interface TxtReaderViewProps {
   filePath: string;
   lastPosition?: string | null;
-  onRelocate?: (charOffset: number, percent: number) => void;
-  onChaptersLoaded?: (chapters: TxtChapter[]) => void;
+  onRelocate?: (position: string | null, percent: number) => void;
+  onChaptersLoaded?: (chapters: BookDocTocItem[]) => void;
   onError?: (error: Error) => void;
 }
 
@@ -116,7 +117,7 @@ export const TxtReaderView = forwardRef<TxtReaderViewHandle, TxtReaderViewProps>
           const result = await parseTxtFile(filePath);
           if (cancelled) return;
           setContent(result);
-          onChaptersLoaded?.(result.chapters);
+          onChaptersLoaded?.(fromTxtChapters(result.chapters));
           logInfo(SOURCE, "TXT 加载成功", {
             encoding: result.encoding,
             chapterCount: result.chapters.length,
@@ -172,7 +173,7 @@ export const TxtReaderView = forwardRef<TxtReaderViewHandle, TxtReaderViewProps>
         const percent = effectiveMax > 0 ? Math.round((scrollPos / effectiveMax) * 100) : 0;
         const fraction = effectiveMax > 0 ? scrollPos / effectiveMax : 0;
         const charOffset = Math.round(fraction * content.text.length);
-        onRelocateRef.current?.(charOffset, percent);
+        onRelocateRef.current?.(charOffset.toString(), percent);
       };
 
       const requestFlush = () => {
