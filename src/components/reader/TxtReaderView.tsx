@@ -41,7 +41,6 @@ function buildSegments(content: TxtContent): TextSegment[] {
   const segments: TextSegment[] = [];
   const firstChapter = chapters[0]!;
 
-  // 首章节前的文本（序言等）
   if (firstChapter.startOffset > 0) {
     segments.push({
       offset: 0,
@@ -57,10 +56,8 @@ function buildSegments(content: TxtContent): TextSegment[] {
     const raw = text.slice(start, end);
 
     let body = raw;
-    // 章节标题在文本中存在时，跳过标题行避免重复
     if (raw.startsWith(ch.title)) {
       const titleEnd = raw.indexOf("\n", ch.title.length);
-      // 标题后有换行才截取，否则保留全文（标题与正文同行的情况）
       if (titleEnd >= 0) {
         body = raw.slice(titleEnd + 1);
       }
@@ -85,8 +82,16 @@ export const TxtReaderView = forwardRef<TxtReaderViewHandle, TxtReaderViewProps>
     const contentRef = useRef<HTMLDivElement>(null);
     const [loading, setLoading] = useState(true);
     const [content, setContent] = useState<TxtContent | null>(null);
+    const [error, setError] = useState<string | null>(null);
     const progressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const progressPendingRef = useRef(false);
+    const onRelocateRef = useRef(onRelocate);
+    const onChaptersLoadedRef = useRef(onChaptersLoaded);
+    const onErrorRef = useRef(onError);
+
+    onRelocateRef.current = onRelocate;
+    onChaptersLoadedRef.current = onChaptersLoaded;
+    onErrorRef.current = onError;
 
     const { fontFamily, fontSize, lineHeight, margin } = config.viewSettings;
 
@@ -105,25 +110,27 @@ export const TxtReaderView = forwardRef<TxtReaderViewHandle, TxtReaderViewProps>
       []
     );
 
-    // 加载 TXT 文件
     useEffect(() => {
       let cancelled = false;
 
       (async () => {
         try {
           setLoading(true);
+          setError(null);
           const result = await parseTxtFile(filePath);
           if (cancelled) return;
           setContent(result);
-          onChaptersLoaded?.(fromTxtChapters(result.chapters));
+          onChaptersLoadedRef.current?.(fromTxtChapters(result.chapters));
           logInfo(SOURCE, "TXT 加载成功", {
             encoding: result.encoding,
             chapterCount: result.chapters.length,
           });
         } catch (err) {
           if (!cancelled) {
+            const nextError = err instanceof Error ? err.message : String(err);
             logError(SOURCE, "TXT 加载失败", err);
-            onError?.(err instanceof Error ? err : new Error(String(err)));
+            setError(nextError);
+            onErrorRef.current?.(err instanceof Error ? err : new Error(nextError));
           }
         } finally {
           if (!cancelled) setLoading(false);
@@ -133,10 +140,8 @@ export const TxtReaderView = forwardRef<TxtReaderViewHandle, TxtReaderViewProps>
       return () => {
         cancelled = true;
       };
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [filePath]);
 
-    // 恢复上次阅读位置
     useEffect(() => {
       if (!content || !lastPosition) return;
       const offset = parseInt(lastPosition, 10);
@@ -153,13 +158,9 @@ export const TxtReaderView = forwardRef<TxtReaderViewHandle, TxtReaderViewProps>
       });
     }, [content, lastPosition]);
 
-    // 滚动进度追踪（节流 100ms，滚动中实时更新进度条）
-    const onRelocateRef = useRef(onRelocate);
-    onRelocateRef.current = onRelocate;
-
     useEffect(() => {
       const container = containerRef.current;
-      if (!container || !content) return;
+      if (!container || !content || error) return;
 
       const flushProgress = () => {
         const contentEl = contentRef.current;
@@ -194,13 +195,12 @@ export const TxtReaderView = forwardRef<TxtReaderViewHandle, TxtReaderViewProps>
       container.addEventListener("scroll", handleScroll, { passive: true });
       return () => {
         container.removeEventListener("scroll", handleScroll);
-        // 卸载时立即保存最后一次进度，避免节流窗口内丢失
         if (progressTimerRef.current) clearTimeout(progressTimerRef.current);
         progressTimerRef.current = null;
         progressPendingRef.current = false;
         flushProgress();
       };
-    }, [content]);
+    }, [content, error]);
 
     const segments = useMemo(
       () => (content ? buildSegments(content) : []),
@@ -225,7 +225,12 @@ export const TxtReaderView = forwardRef<TxtReaderViewHandle, TxtReaderViewProps>
             <div className="text-sm text-muted-foreground">加载中…</div>
           </div>
         )}
-        {!loading && content && (
+        {!loading && error && (
+          <div className="absolute inset-0 flex items-center justify-center px-6">
+            <div className="text-sm text-destructive">加载失败：{error}</div>
+          </div>
+        )}
+        {!loading && !error && content && (
           <>
             <div ref={contentRef} className="mx-auto max-w-3xl py-8" style={textStyle}>
               {segments.map((seg, i) => (

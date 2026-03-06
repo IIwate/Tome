@@ -25,7 +25,7 @@ function App() {
   const closeBookInReader = useReaderStore((s) => s.closeBook);
 
   const [currentView, setCurrentView] = useState<AppView>("library");
-  const [selectedBook, setSelectedBook] = useState<Book | null>(null);
+  const [selectedBookId, setSelectedBookId] = useState<string | null>(null);
 
   useEffect(() => {
     hydrateSettings();
@@ -34,7 +34,7 @@ function App() {
 
   const handleOpenBook = useCallback(
     (book: Book) => {
-      setSelectedBook(book);
+      setSelectedBookId(book.id);
       setCurrentView("reader");
       updateBook(book.id, { lastOpenedAt: Date.now() });
       openBookInReader(book.id, book.progress.position, book.progress.percent);
@@ -44,7 +44,7 @@ function App() {
 
   const handleBack = useCallback(() => {
     setCurrentView("library");
-    setSelectedBook(null);
+    setSelectedBookId(null);
     closeBookInReader();
   }, [closeBookInReader]);
 
@@ -63,7 +63,7 @@ function App() {
           >
             <LibraryPage onOpenBook={handleOpenBook} />
           </motion.div>
-        ) : selectedBook ? (
+        ) : selectedBookId ? (
           <motion.div
             key="reader"
             className="h-full"
@@ -73,7 +73,7 @@ function App() {
             exit="exit"
             transition={pageTransition}
           >
-            <ReaderPage book={selectedBook} onBack={handleBack} />
+            <ReaderPage bookId={selectedBookId} onBack={handleBack} />
           </motion.div>
         ) : null}
       </AnimatePresence>

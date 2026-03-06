@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getReaderAdapterComponent,
   type ReaderAdapterHandle,
@@ -6,76 +6,99 @@ import {
 import { ControlOverlay } from "./ControlOverlay";
 import { ChapterNav } from "./ChapterNav";
 import { SettingsPanel } from "./SettingsPanel";
-import { useLibraryStore, type Book } from "@/stores/library";
+import { ReaderErrorBoundary, ReaderErrorPanel } from "./ReaderErrorBoundary";
+import { useLibraryStore } from "@/stores/library";
 import { useReaderStore } from "@/stores/reader";
 import {
   createDocumentSession,
   createBookDocShell,
   type BookDocTocItem,
-  type BookDoc,
   type BookReadingProgress,
 } from "@/lib/book-doc";
 import {
-  createBookConfig,
   hasBookConfigOverride,
-  mergeBookConfig,
   mergeBookConfigOverride,
+  resolveBookConfig,
 } from "@/lib/book-config";
 import { useViewSettings } from "@/stores/settings";
+import type { ViewSettings } from "@/lib/book-config";
 import { logError } from "@/lib/logger";
 
 interface ReaderPageProps {
-  book: Book;
+  bookId: string;
   onBack: () => void;
 }
 
 const SOURCE = "reader/ReaderPage";
 
-export function ReaderPage({ book, onBack }: ReaderPageProps) {
+export function ReaderPage({ bookId, onBack }: ReaderPageProps) {
+  const book = useLibraryStore(
+    (state) => state.books.find((item) => item.id === bookId) ?? null
+  );
   const updateBook = useLibraryStore((s) => s.updateBook);
   const updateProgress = useReaderStore((s) => s.updateProgress);
   const setChapters = useReaderStore((s) => s.setChapters);
   const chapters = useReaderStore((s) => s.chapters);
   const percent = useReaderStore((s) => s.percent);
   const viewSettings = useViewSettings();
-  const globalBookConfig = createBookConfig(viewSettings);
-  const effectiveBookConfig = mergeBookConfig(globalBookConfig, book.bookConfig);
-  const currentBookDoc: BookDoc = createBookDocShell({
-    format: book.format,
-    title: book.title,
-    author: book.author,
-    toc: chapters,
-  });
-  const session = createDocumentSession({
-    id: book.id,
-    format: book.format,
-    filePath: book.path,
-    progress: {
-      position: book.progress.position,
-      percent: book.progress.percent,
-    },
-    doc: {
-      ...currentBookDoc,
+
+  const effectiveBookConfig = useMemo(
+    () => resolveBookConfig(viewSettings, book?.bookConfig),
+    [book?.bookConfig, viewSettings]
+  );
+
+  const session = useMemo(() => {
+    if (!book) return null;
+
+    const doc = createBookDocShell({
+      format: book.format,
+      title: book.title,
+      author: book.author,
       toc: chapters,
-    },
-  });
-  const ReaderAdapter = getReaderAdapterComponent(session.format);
-  const hasOverrides = hasBookConfigOverride(book.bookConfig);
+    });
+
+    return createDocumentSession({
+      id: book.id,
+      format: book.format,
+      filePath: book.path,
+      progress: {
+        position: book.progress.position,
+        percent: book.progress.percent,
+      },
+      doc: {
+        ...doc,
+        toc: chapters,
+      },
+    });
+  }, [book, chapters]);
 
   const lastBookProgressRef = useRef({
-    position: book.progress.position,
-    percent: book.progress.percent,
+    position: book?.progress.position ?? null,
+    percent: book?.progress.percent ?? 0,
   });
   const bookProgressDirtyRef = useRef(false);
+  const [chapterNavOpen, setChapterNavOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [readerError, setReaderError] = useState<string | null>(null);
+  const readerRef = useRef<ReaderAdapterHandle>(null);
+
+  useEffect(() => {
+    lastBookProgressRef.current = {
+      position: book?.progress.position ?? null,
+      percent: book?.progress.percent ?? 0,
+    };
+    bookProgressDirtyRef.current = false;
+    setReaderError(null);
+  }, [book?.id]);
 
   const flushBookProgress = useCallback(() => {
-    if (!bookProgressDirtyRef.current) return;
-    const p = lastBookProgressRef.current;
+    if (!book || !bookProgressDirtyRef.current) return;
+    const progress = lastBookProgressRef.current;
     updateBook(book.id, {
-      progress: { position: p.position, percent: p.percent },
+      progress: { position: progress.position, percent: progress.percent },
     });
     bookProgressDirtyRef.current = false;
-  }, [book.id, updateBook]);
+  }, [book, updateBook]);
 
   useEffect(() => {
     return () => {
@@ -88,26 +111,21 @@ export function ReaderPage({ book, onBack }: ReaderPageProps) {
     onBack();
   }, [flushBookProgress, onBack]);
 
-  const [chapterNavOpen, setChapterNavOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-
-  const readerRef = useRef<ReaderAdapterHandle>(null);
-
   const handleRelocate = useCallback(
-    (position: string | null, percent: number) => {
-      const next: BookReadingProgress = { position, percent };
-      const pos = next.position;
-      const pct = next.percent;
-      lastBookProgressRef.current = { position: pos, percent: pct };
+    (position: string | null, nextPercent: number) => {
+      if (!book) return;
+
+      const next: BookReadingProgress = { position, percent: nextPercent };
+      lastBookProgressRef.current = next;
       if (
         !bookProgressDirtyRef.current &&
-        (pos !== book.progress.position || pct !== book.progress.percent)
+        (next.position !== book.progress.position || next.percent !== book.progress.percent)
       ) {
         bookProgressDirtyRef.current = true;
       }
-      updateProgress(pos, pct);
+      updateProgress(next.position, next.percent);
     },
-    [book.progress.percent, book.progress.position, updateProgress]
+    [book, updateProgress]
   );
 
   const handleTocLoaded = useCallback(
@@ -118,17 +136,19 @@ export function ReaderPage({ book, onBack }: ReaderPageProps) {
   );
 
   const handleChangeViewSettings = useCallback(
-    (patch: Partial<typeof viewSettings>) => {
+    (patch: Partial<ViewSettings>) => {
+      if (!book) return;
       updateBook(book.id, {
         bookConfig: mergeBookConfigOverride(book.bookConfig, patch),
       });
     },
-    [book.bookConfig, book.id, updateBook, viewSettings]
+    [book, updateBook]
   );
 
   const handleResetViewSettings = useCallback(() => {
+    if (!book) return;
     updateBook(book.id, { bookConfig: undefined });
-  }, [book.id, updateBook]);
+  }, [book, updateBook]);
 
   const handleChapterNavigate = useCallback(
     async (href: string) => {
@@ -138,46 +158,71 @@ export function ReaderPage({ book, onBack }: ReaderPageProps) {
     []
   );
 
+  const handleReaderError = useCallback((err: Error) => {
+    setReaderError(err.message);
+    logError(SOURCE, "阅读器错误", err);
+  }, []);
+
+  if (!book || !session) {
+    return (
+      <ReaderErrorPanel
+        title="书籍不存在"
+        message="这本书可能已被移除，请返回书架重新选择。"
+        onBack={onBack}
+      />
+    );
+  }
+
+  const ReaderAdapter = getReaderAdapterComponent(book.format);
+  const hasOverrides = hasBookConfigOverride(book.bookConfig);
+
   return (
     <div className="relative h-full overflow-hidden">
-      {/* 阅读区域（全屏） */}
-      <ReaderAdapter
-        ref={readerRef}
-        filePath={session.filePath}
-        lastPosition={session.progress.position}
-        config={effectiveBookConfig}
-        onRelocate={handleRelocate}
-        onTocLoaded={handleTocLoaded}
-        onError={(err) => logError(SOURCE, "阅读器错误", err)}
-      />
+      {readerError ? (
+        <ReaderErrorPanel message={readerError} onBack={handleBack} />
+      ) : (
+        <ReaderErrorBoundary
+          onBack={handleBack}
+          resetKeys={[book.id, book.path, book.format]}
+        >
+          <>
+            <ReaderAdapter
+              ref={readerRef}
+              filePath={session.filePath}
+              lastPosition={session.progress.position}
+              config={effectiveBookConfig}
+              onRelocate={handleRelocate}
+              onTocLoaded={handleTocLoaded}
+              onError={handleReaderError}
+            />
 
-      {/* 浮动控制层 */}
-      <ControlOverlay
-        title={session.doc.metadata.title}
-        percent={percent}
-        hasChapters={session.doc.toc.length > 0}
-        onBack={handleBack}
-        onOpenChapters={() => setChapterNavOpen(true)}
-        onOpenSettings={() => setSettingsOpen(true)}
-      />
+            <ControlOverlay
+              title={session.doc.metadata.title}
+              percent={percent}
+              hasChapters={session.doc.toc.length > 0}
+              onBack={handleBack}
+              onOpenChapters={() => setChapterNavOpen(true)}
+              onOpenSettings={() => setSettingsOpen(true)}
+            />
 
-      {/* 章节导航 */}
-      <ChapterNav
-        toc={session.doc.toc}
-        open={chapterNavOpen}
-        onClose={() => setChapterNavOpen(false)}
-        onNavigate={handleChapterNavigate}
-      />
+            <ChapterNav
+              toc={session.doc.toc}
+              open={chapterNavOpen}
+              onClose={() => setChapterNavOpen(false)}
+              onNavigate={handleChapterNavigate}
+            />
 
-      {/* 排版设置 */}
-      <SettingsPanel
-        open={settingsOpen}
-        config={effectiveBookConfig}
-        hasOverrides={hasOverrides}
-        onChangeViewSettings={handleChangeViewSettings}
-        onResetViewSettings={handleResetViewSettings}
-        onClose={() => setSettingsOpen(false)}
-      />
+            <SettingsPanel
+              open={settingsOpen}
+              config={effectiveBookConfig}
+              hasOverrides={hasOverrides}
+              onChangeViewSettings={handleChangeViewSettings}
+              onResetViewSettings={handleResetViewSettings}
+              onClose={() => setSettingsOpen(false)}
+            />
+          </>
+        </ReaderErrorBoundary>
+      )}
     </div>
   );
 }

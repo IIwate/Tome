@@ -1,8 +1,11 @@
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 import { shallow } from "zustand/shallow";
+import { useShallow } from "zustand/react/shallow";
 import type { BookConfig, Theme, ViewSettings } from "@/lib/book-config";
+import { createBookConfig } from "@/lib/book-config";
 import { loadPersistedSettings, persistSettings } from "@/lib/tauri-store";
+
 export type BookDeleteMode = "library-only" | "library-and-file";
 
 interface SettingsState {
@@ -78,19 +81,19 @@ export function getViewSettingsSnapshot(
 }
 
 export function getBookConfigSnapshot(): BookConfig {
-  return {
-    viewSettings: getViewSettingsSnapshot(),
-  };
+  return createBookConfig(getViewSettingsSnapshot());
 }
 
 export function useViewSettings(): ViewSettings {
-  return useSettingsStore((s) => ({
-    theme: s.theme,
-    fontFamily: s.fontFamily,
-    fontSize: s.fontSize,
-    lineHeight: s.lineHeight,
-    margin: s.margin,
-  }));
+  return useSettingsStore(
+    useShallow((s) => ({
+      theme: s.theme,
+      fontFamily: s.fontFamily,
+      fontSize: s.fontSize,
+      lineHeight: s.lineHeight,
+      margin: s.margin,
+    }))
+  );
 }
 
 export const useSettingsStore = create<SettingsState & SettingsActions>()(
@@ -123,7 +126,6 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
   }))
 );
 
-// 主题变更时同步到 DOM + localStorage 缓存
 useSettingsStore.subscribe(
   (s) => s.theme,
   (theme) => {
@@ -131,12 +133,10 @@ useSettingsStore.subscribe(
     try {
       localStorage.setItem("reader-theme", theme);
     } catch {
-      // localStorage 不可用时忽略
     }
   }
 );
 
-// 设置变更时自动持久化（shallow 比较避免无变更触发）
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 
 export async function flushSettingsPersist() {
@@ -170,7 +170,6 @@ useSettingsStore.subscribe(
   { equalityFn: shallow }
 );
 
-// 启动时快速恢复主题（同步读取 localStorage 缓存，避免闪烁）
 const cachedTheme = (() => {
   try {
     return localStorage.getItem("reader-theme") as Theme | null;

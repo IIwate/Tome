@@ -668,6 +668,12 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
 
           const pcRaw = info.page_count ?? info.pageCount ?? 0;
           const pc = clampInt(toFiniteNumber(pcRaw) ?? 0, 0, 1_000_000);
+          if (pc <= 0) {
+            const emptyError = new Error("未读取到 PDF 页数");
+            setError(emptyError.message);
+            onErrorRef.current?.(emptyError);
+            return;
+          }
           setPageCount(pc);
 
           const bookmarks = Array.isArray(info.bookmarks) ? info.bookmarks : [];
@@ -994,3 +1000,4 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
     );
   }
 );
+
