@@ -118,6 +118,8 @@ static PAGE_LOCKS: LazyLock<Mutex<HashMap<PageLockKey, Arc<StdMutex<()>>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static CACHE_RESOURCE_REGISTRY: LazyLock<Mutex<HashMap<String, PathBuf>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+static CACHE_ACCESS_REGISTRY: LazyLock<Mutex<HashMap<PathBuf, u64>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 static PAGE_RENDER_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Debug, Clone)]
@@ -474,8 +476,8 @@ fn system_time_to_ms(time: SystemTime) -> u64 {
 }
 
 fn touch_cache_file(path: &Path) {
-    if let Ok(bytes) = fs::read(path) {
-        let _ = atomic_write_jpeg(path, &bytes);
+    if let Ok(mut registry) = CACHE_ACCESS_REGISTRY.lock() {
+        registry.insert(path.to_path_buf(), system_time_to_ms(SystemTime::now()));
     }
 }
 
@@ -692,6 +694,8 @@ fn write_page_and_meta(
         .map_err(|e| format!("序列化缓存元数据失败: {e}"))?;
     atomic_write_bytes(&meta_path, &meta_bytes)?;
 
+    touch_cache_file(&page_path);
+
     Ok(page_path)
 }
 
@@ -708,6 +712,9 @@ fn get_page_lock(key: PageLockKey) -> Result<Arc<StdMutex<()>>, String> {
 fn forget_cache_resource_by_path(path: &Path) {
     if let Ok(mut registry) = CACHE_RESOURCE_REGISTRY.lock() {
         registry.retain(|_, value| value != path);
+    }
+    if let Ok(mut access) = CACHE_ACCESS_REGISTRY.lock() {
+        access.remove(path);
     }
 }
 
@@ -741,10 +748,15 @@ fn collect_cache_file_entries(root: &Path) -> Result<Vec<CacheFileEntry>, String
             .modified()
             .map(system_time_to_ms)
             .unwrap_or(0);
+        let access_ms = CACHE_ACCESS_REGISTRY
+            .lock()
+            .ok()
+            .and_then(|registry| registry.get(&path).copied())
+            .unwrap_or(0);
         entries.push(CacheFileEntry {
             path,
             size: metadata.len(),
-            modified_ms,
+            modified_ms: modified_ms.max(access_ms),
         });
     }
 

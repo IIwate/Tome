@@ -9,7 +9,6 @@ import {
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { FoliateTocItem } from "@/lib/foliate";
-import { createConcurrencyLimiter } from "@/lib/concurrency-limiter";
 import { calcRenderWindow } from "@/lib/render-window";
 import { logInfo } from "@/lib/logger";
 
@@ -43,11 +42,42 @@ export interface EvictPdfPageCacheByDistanceOptions {
   max: number;
 }
 
+type RenderTaskPriority = 0 | 1 | 2;
+
+interface PendingRenderTask {
+  pageIndex: number;
+  priority: RenderTaskPriority;
+  sequence: number;
+}
+
+interface RenderScheduler {
+  token: number;
+  runningCount: number;
+  runningPages: Set<number>;
+  queue: Map<number, PendingRenderTask>;
+  desiredPriorities: Map<number, RenderTaskPriority>;
+  sequence: number;
+  cancelled: boolean;
+}
+
 export const MAX_CACHED_PAGES = 200;
+const RENDER_CONCURRENCY = 2;
 
 function distanceToAnchors(pageIndex: number, anchors: readonly number[]): number {
   if (anchors.length === 0) return 0;
   return Math.min(...anchors.map((anchor) => Math.abs(anchor - pageIndex)));
+}
+
+function createRenderScheduler(token: number): RenderScheduler {
+  return {
+    token,
+    runningCount: 0,
+    runningPages: new Set(),
+    queue: new Map(),
+    desiredPriorities: new Map(),
+    sequence: 0,
+    cancelled: false,
+  };
 }
 
 export function resolveRenderPageUrl(result: RenderPageResult): string {
@@ -142,6 +172,7 @@ function parseLastPosition(lastPosition: string | null | undefined): number | nu
 const SOURCE = "reader/PdfReaderView";
 const PAGE_GAP_PX = 24; // tailwind: mb-6（默认 1.5rem = 24px）
 const WINDOW_BUFFER_PAGES = 8;
+const LOAD_ROOT_MARGIN_PX = 320;
 // 与后端 src-tauri/src/commands/pdf.rs 的 MAX_RENDER_WIDTH 对齐
 const MAX_RENDER_PDF_PAGE_WIDTH = 2000;
 
@@ -237,16 +268,13 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
     const scrollAnchorRef = useRef(0);
 
     const fileTokenRef = useRef(0);
-    const renderPageLimiterRef = useRef<ReturnType<
-      typeof createConcurrencyLimiter
-    > | null>(null);
-    if (!renderPageLimiterRef.current) {
-      renderPageLimiterRef.current = createConcurrencyLimiter(2);
-    }
+    const renderSchedulerRef = useRef<RenderScheduler>(createRenderScheduler(0));
     const pageElsRef = useRef<Map<number, HTMLDivElement>>(new Map());
     const cacheRef = useRef<Map<number, PageCache>>(new Map());
     const nearPagesRef = useRef<Set<number>>(new Set());
     const visiblePagesRef = useRef<Set<number>>(new Set());
+    const firstPageSettledRef = useRef(false);
+    const scheduleProcessNearRef = useRef<() => void>(() => {});
     const loadObserverRef = useRef<IntersectionObserver | null>(null);
     const visibleObserverRef = useRef<IntersectionObserver | null>(null);
 
@@ -305,6 +333,10 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
           cacheRef.current.set(pageIndex, cache);
           requestRerender();
         }
+        if (!firstPageSettledRef.current && pageIndex === scrollAnchorRef.current) {
+          firstPageSettledRef.current = true;
+          scheduleProcessNearRef.current();
+        }
       },
       [requestRerender]
     );
@@ -323,63 +355,175 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
       [requestRerender]
     );
 
-    const ensureRenderPage = useCallback(
-      async (pageIndex: number) => {
-        const token = fileTokenRef.current;
+    const resetPendingPage = useCallback(
+      (pageIndex: number) => {
+        const cache = cacheRef.current.get(pageIndex);
+        if (!cache || cache.url || !cache.loading) return;
+        cache.loading = false;
+        cache.error = null;
+        cacheRef.current.set(pageIndex, cache);
+      },
+      []
+    );
+
+    const pumpRenderQueueRef = useRef<(scheduler?: RenderScheduler) => void>(() => {});
+
+    const runRenderTask = useCallback(
+      async (task: PendingRenderTask, scheduler: RenderScheduler) => {
+        try {
+          if (scheduler.cancelled || fileTokenRef.current !== scheduler.token) return;
+
+          const width = Math.min(
+            Math.max(1, Math.round(renderWidth)),
+            MAX_RENDER_PDF_PAGE_WIDTH
+          );
+          const result = await invoke<RenderPageResult>("render_pdf_page", {
+            path: filePath,
+            pageIndex: task.pageIndex,
+            width,
+          });
+
+          if (scheduler.cancelled || fileTokenRef.current !== scheduler.token) return;
+
+          const cache = cacheRef.current.get(task.pageIndex);
+          if (!cache) return;
+          const next = applyRenderPageResult(cache, result);
+          cacheRef.current.set(task.pageIndex, next);
+          requestRerender();
+        } catch (err) {
+          if (scheduler.cancelled || fileTokenRef.current !== scheduler.token) return;
+          const msg = err instanceof Error ? err.message : String(err);
+          const cache = cacheRef.current.get(task.pageIndex);
+          if (!cache) return;
+          cache.loading = false;
+          cache.error = msg || "渲染失败";
+          cacheRef.current.set(task.pageIndex, cache);
+          requestRerender();
+          onErrorRef.current?.(err instanceof Error ? err : new Error(msg));
+        } finally {
+          scheduler.runningPages.delete(task.pageIndex);
+          scheduler.runningCount = Math.max(0, scheduler.runningCount - 1);
+          if (!scheduler.cancelled) {
+            pumpRenderQueueRef.current(scheduler);
+          }
+        }
+      },
+      [filePath, renderWidth, requestRerender]
+    );
+
+    const pumpRenderQueue = useCallback(
+      (scheduler: RenderScheduler = renderSchedulerRef.current) => {
+        if (scheduler.cancelled) return;
+
+        while (scheduler.runningCount < RENDER_CONCURRENCY) {
+          const candidates = Array.from(scheduler.queue.values()).filter((task) =>
+            scheduler.desiredPriorities.has(task.pageIndex)
+          );
+          if (candidates.length === 0) return;
+
+          candidates.sort((left, right) => {
+            if (left.priority !== right.priority) {
+              return left.priority - right.priority;
+            }
+
+            const leftDistance = Math.abs(left.pageIndex - scrollAnchorRef.current);
+            const rightDistance = Math.abs(right.pageIndex - scrollAnchorRef.current);
+            if (leftDistance !== rightDistance) {
+              return leftDistance - rightDistance;
+            }
+
+            return left.sequence - right.sequence;
+          });
+
+          const task = candidates[0];
+          if (!task) return;
+
+          scheduler.queue.delete(task.pageIndex);
+          scheduler.runningPages.add(task.pageIndex);
+          scheduler.runningCount += 1;
+          void runRenderTask(task, scheduler);
+        }
+      },
+      [runRenderTask]
+    );
+    pumpRenderQueueRef.current = pumpRenderQueue;
+
+    const queueRenderPage = useCallback(
+      (pageIndex: number, priority: RenderTaskPriority) => {
+        const scheduler = renderSchedulerRef.current;
+        if (scheduler.cancelled) return;
         if (pageIndex < 0 || pageIndex >= pageCount) return;
 
-        const map = cacheRef.current;
-        const cache: PageCache = map.get(pageIndex) ?? {
+        const cache = cacheRef.current.get(pageIndex) ?? {
           url: null,
           height: null,
           loading: false,
           error: null,
         };
 
-        if (cache.url || cache.loading) {
-          map.set(pageIndex, cache);
+        if (cache.url) {
+          cacheRef.current.set(pageIndex, cache);
+          return;
+        }
+
+        scheduler.desiredPriorities.set(pageIndex, priority);
+
+        const existing = scheduler.queue.get(pageIndex);
+        if (existing) {
+          existing.priority = Math.min(existing.priority, priority) as RenderTaskPriority;
+          return;
+        }
+
+        if (scheduler.runningPages.has(pageIndex)) {
           return;
         }
 
         cache.loading = true;
         cache.error = null;
-        map.set(pageIndex, cache);
+        cacheRef.current.set(pageIndex, cache);
         requestRerender();
 
-        try {
-          const limit = renderPageLimiterRef.current;
-          if (!limit) return;
-          const width = Math.min(
-            Math.max(1, Math.round(renderWidth)),
-            MAX_RENDER_PDF_PAGE_WIDTH
-          );
-          const result = await limit(async () => {
-            // 切书后：排队中的任务开始执行前直接跳过，避免浪费渲染
-            if (fileTokenRef.current !== token) return null;
-            return invoke<RenderPageResult>("render_pdf_page", {
-              path: filePath,
-              pageIndex,
-              width,
-            });
-          });
-          if (result == null) return;
-          if (fileTokenRef.current !== token) return;
-
-          const next = applyRenderPageResult(map.get(pageIndex) ?? cache, result);
-          map.set(pageIndex, next);
-          requestRerender();
-        } catch (err) {
-          if (fileTokenRef.current !== token) return;
-          const msg = err instanceof Error ? err.message : String(err);
-          const next = map.get(pageIndex) ?? cache;
-          next.loading = false;
-          next.error = msg || "渲染失败";
-          map.set(pageIndex, next);
-          requestRerender();
-          onErrorRef.current?.(err instanceof Error ? err : new Error(msg));
-        }
+        scheduler.sequence += 1;
+        scheduler.queue.set(pageIndex, {
+          pageIndex,
+          priority,
+          sequence: scheduler.sequence,
+        });
       },
-      [filePath, pageCount, renderWidth, requestRerender]
+      [pageCount, requestRerender]
+    );
+
+    const syncRenderQueue = useCallback(
+      (desired: Map<number, RenderTaskPriority>) => {
+        const scheduler = renderSchedulerRef.current;
+        if (scheduler.cancelled) return;
+
+        scheduler.desiredPriorities = desired;
+
+        let changed = false;
+        for (const [pageIndex] of Array.from(scheduler.queue.entries())) {
+          if (desired.has(pageIndex)) continue;
+          scheduler.queue.delete(pageIndex);
+          resetPendingPage(pageIndex);
+          changed = true;
+        }
+
+        for (const [pageIndex, priority] of desired) {
+          queueRenderPage(pageIndex, priority);
+        }
+
+        if (changed) requestRerender();
+        pumpRenderQueue(scheduler);
+      },
+      [pumpRenderQueue, queueRenderPage, requestRerender, resetPendingPage]
+    );
+
+    const ensureRenderPage = useCallback(
+      (pageIndex: number, priority: RenderTaskPriority) => {
+        queueRenderPage(pageIndex, priority);
+        pumpRenderQueue();
+      },
+      [pumpRenderQueue, queueRenderPage]
     );
 
     const processNearPages = useCallback(() => {
@@ -390,6 +534,15 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
 
       const wanted = new Set<number>();
       const priority = new Set<number>();
+      const desired = new Map<number, RenderTaskPriority>();
+
+      if (!firstPageSettledRef.current) {
+        desired.set(scrollAnchorRef.current, 0);
+        syncRenderQueue(desired);
+        return;
+      }
+
+      desired.set(scrollAnchorRef.current, 0);
 
       for (const idx of visiblePagesRef.current) {
         for (let d = -2; d <= 2; d++) {
@@ -405,14 +558,17 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
         }
       }
 
-      const priorityList = Array.from(priority).sort((a, b) => a - b);
-      for (const idx of priorityList) void ensureRenderPage(idx);
-
-      const wantedList = Array.from(wanted).sort((a, b) => a - b);
-      for (const idx of wantedList) {
-        if (priority.has(idx)) continue;
-        void ensureRenderPage(idx);
+      for (const idx of priority) {
+        const current = desired.get(idx);
+        if (current == null || current > 1) desired.set(idx, 1);
       }
+
+      for (const idx of wanted) {
+        const current = desired.get(idx);
+        if (current == null || current > 2) desired.set(idx, 2);
+      }
+
+      syncRenderQueue(desired);
 
       let changed = false;
       const map = cacheRef.current;
@@ -438,7 +594,7 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
         changed = true;
       }
       if (changed) requestRerender();
-    }, [ensureRenderPage, pageCount, requestRerender]);
+    }, [ensureRenderPage, pageCount, requestRerender, resetPendingPage, syncRenderQueue]);
 
     const nearProcessScheduledRef = useRef(false);
     const scheduleProcessNear = useCallback(() => {
@@ -449,6 +605,7 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
         processNearPages();
       });
     }, [processNearPages]);
+    scheduleProcessNearRef.current = scheduleProcessNear;
 
     const estimatedHeight = Math.max(Math.round(renderWidth * 1.4), 320);
     const estimatedStep = Math.max(1, estimatedHeight + PAGE_GAP_PX);
@@ -506,6 +663,8 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
     useEffect(() => {
       let cancelled = false;
       const token = ++fileTokenRef.current;
+      renderSchedulerRef.current.cancelled = true;
+      renderSchedulerRef.current = createRenderScheduler(token);
 
       setLoading(true);
       setError(null);
@@ -513,6 +672,7 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
       cacheRef.current.clear();
       nearPagesRef.current.clear();
       visiblePagesRef.current.clear();
+      firstPageSettledRef.current = false;
       lastReportedRef.current = null;
       scrollAnchorRef.current = 0;
       setScrollAnchor(0);
@@ -548,6 +708,7 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
 
       return () => {
         cancelled = true;
+        renderSchedulerRef.current.cancelled = true;
       };
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [filePath]);
@@ -610,7 +771,7 @@ export const PdfReaderView = forwardRef<PdfReaderViewHandle, PdfReaderViewProps>
         },
         {
           root: container,
-          rootMargin: "800px 0px 800px 0px",
+          rootMargin: `${LOAD_ROOT_MARGIN_PX}px 0px ${LOAD_ROOT_MARGIN_PX}px 0px`,
           threshold: 0.01,
         }
       );
