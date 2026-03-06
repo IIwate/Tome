@@ -2,7 +2,6 @@ import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 import { shallow } from "zustand/shallow";
 import { loadPersistedSettings, persistSettings } from "@/lib/tauri-store";
-import { logger } from "@/lib/logger";
 
 export type Theme = "light" | "dark" | "sepia";
 export type BookDeleteMode = "library-only" | "library-and-file";
@@ -15,7 +14,6 @@ interface SettingsState {
   margin: number;
   bookDeleteSkipConfirm: boolean;
   bookDeleteMode: BookDeleteMode;
-  debugMode: boolean;
   pdfCacheBaseDir: string;
   _hydrated: boolean;
 }
@@ -28,7 +26,6 @@ interface SettingsActions {
   setMargin: (margin: number) => void;
   setBookDeleteSkipConfirm: (skip: boolean) => void;
   setBookDeleteMode: (mode: BookDeleteMode) => void;
-  setDebugMode: (debugMode: boolean) => void;
   setPdfCacheBaseDir: (pdfCacheBaseDir: string) => void;
   hydrate: () => Promise<void>;
 }
@@ -41,7 +38,6 @@ const DEFAULTS: Omit<SettingsState, "_hydrated"> = {
   margin: 60,
   bookDeleteSkipConfirm: false,
   bookDeleteMode: "library-only",
-  debugMode: false,
   pdfCacheBaseDir: "",
 };
 
@@ -60,7 +56,6 @@ function getPersistedSettingsSnapshot() {
     margin: state.margin,
     bookDeleteSkipConfirm: state.bookDeleteSkipConfirm,
     bookDeleteMode: state.bookDeleteMode,
-    debugMode: state.debugMode,
     pdfCacheBaseDir: state.pdfCacheBaseDir,
   };
 }
@@ -77,7 +72,6 @@ export const useSettingsStore = create<SettingsState & SettingsActions>()(
     setMargin: (margin) => set({ margin }),
     setBookDeleteSkipConfirm: (skip) => set({ bookDeleteSkipConfirm: skip }),
     setBookDeleteMode: (mode) => set({ bookDeleteMode: mode }),
-    setDebugMode: (debugMode) => set({ debugMode }),
     setPdfCacheBaseDir: (pdfCacheBaseDir) => set({ pdfCacheBaseDir }),
 
     hydrate: async () => {
@@ -97,14 +91,6 @@ useSettingsStore.subscribe(
     } catch {
       // localStorage 不可用时忽略
     }
-  }
-);
-
-// 调试模式变更时启用/关闭内存日志采集
-useSettingsStore.subscribe(
-  (s) => s.debugMode,
-  (debugMode) => {
-    logger.setEnabled(debugMode);
   }
 );
 
@@ -129,7 +115,6 @@ useSettingsStore.subscribe(
     margin: s.margin,
     bookDeleteSkipConfirm: s.bookDeleteSkipConfirm,
     bookDeleteMode: s.bookDeleteMode,
-    debugMode: s.debugMode,
     pdfCacheBaseDir: s.pdfCacheBaseDir,
   }),
   () => {

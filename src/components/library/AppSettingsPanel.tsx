@@ -2,7 +2,6 @@ import {
   useCallback,
   useEffect,
   useState,
-  useSyncExternalStore,
 } from "react";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
@@ -12,9 +11,8 @@ import {
   type BookDeleteMode,
 } from "@/stores/settings";
 import { cn } from "@/lib/utils";
-import { logger } from "@/lib/logger";
-import { DebugLogDialog } from "./DebugLogDialog";
 import {
+  ChevronRight,
   FileX2,
   FolderOpen,
   RefreshCcw,
@@ -43,13 +41,6 @@ interface PdfCacheStats {
   total_bytes: number;
 }
 
-const FONT_OPTIONS = [
-  { value: "system-ui", label: "系统默认" },
-  { value: '"SimSun", "宋体", serif', label: "宋体" },
-  { value: '"KaiTi", "楷体", serif', label: "楷体" },
-  { value: '"SimHei", "黑体", sans-serif', label: "黑体" },
-];
-
 const DELETE_MODES: {
   value: BookDeleteMode;
   label: string;
@@ -73,11 +64,6 @@ const DELETE_MODES: {
   },
 ];
 
-/** 将浮点值归一化到最近的步进值 */
-function snapToStep(value: number, min: number, step: number): number {
-  return Math.round((value - min) / step) * step + min;
-}
-
 function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
   const units = ["B", "KB", "MB", "GB"];
@@ -91,88 +77,40 @@ function formatBytes(bytes: number): string {
   return `${value.toFixed(fixed)} ${units[unitIndex]}`;
 }
 
-function RangeSlider({
-  label,
-  value,
-  min,
-  max,
-  step,
-  displayValue,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  step: number;
-  displayValue: string;
-  onChange: (v: number) => void;
-}) {
-  const id = `app-settings-${label}`;
-  const percent = ((value - min) / (max - min)) * 100;
+function getDisplayCacheDir(config: PdfCacheConfig | null): string {
+  if (!config) return "正在读取缓存目录...";
+  if (config.base_dir) return config.base_dir;
 
-  return (
-    <div className="space-y-1.5">
-      <div className="flex items-center justify-between">
-        <label htmlFor={id} className="text-xs text-muted-foreground">
-          {label}
-        </label>
-        <span className="text-xs font-medium tabular-nums text-foreground">
-          {displayValue}
-        </span>
-      </div>
-      <input
-        id={id}
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(e) => onChange(snapToStep(Number(e.target.value), min, step))}
-        className="settings-slider w-full"
-        style={{
-          background: `linear-gradient(to right, hsl(var(--primary) / 0.5) ${percent}%, hsl(var(--muted)) ${percent}%)`,
-        }}
-      />
-    </div>
-  );
+  const normalized = config.effective_dir.replace(/\\/g, "/");
+  const suffix = "/pdf_pages/v1";
+  if (!normalized.endsWith(suffix)) return config.effective_dir;
+
+  const root = normalized.slice(0, -suffix.length);
+  if (!root) return config.effective_dir;
+
+  return config.effective_dir.includes("\\")
+    ? root.replace(/\//g, "\\")
+    : root;
 }
 
 export function AppSettingsPanel({ open, onClose }: AppSettingsPanelProps) {
-  const fontFamily = useSettingsStore((s) => s.fontFamily);
-  const fontSize = useSettingsStore((s) => s.fontSize);
-  const lineHeight = useSettingsStore((s) => s.lineHeight);
-  const margin = useSettingsStore((s) => s.margin);
-  const pdfCacheBaseDir = useSettingsStore((s) => s.pdfCacheBaseDir);
   const bookDeleteSkipConfirm = useSettingsStore(
     (s) => s.bookDeleteSkipConfirm
   );
   const bookDeleteMode = useSettingsStore((s) => s.bookDeleteMode);
-  const debugMode = useSettingsStore((s) => s.debugMode);
 
-  const setFontFamily = useSettingsStore((s) => s.setFontFamily);
-  const setFontSize = useSettingsStore((s) => s.setFontSize);
-  const setLineHeight = useSettingsStore((s) => s.setLineHeight);
-  const setMargin = useSettingsStore((s) => s.setMargin);
   const setPdfCacheBaseDir = useSettingsStore((s) => s.setPdfCacheBaseDir);
   const setBookDeleteSkipConfirm = useSettingsStore(
     (s) => s.setBookDeleteSkipConfirm
   );
   const setBookDeleteMode = useSettingsStore((s) => s.setBookDeleteMode);
-  const setDebugMode = useSettingsStore((s) => s.setDebugMode);
 
-  const [logDialogOpen, setLogDialogOpen] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [cacheConfig, setCacheConfig] = useState<PdfCacheConfig | null>(null);
   const [cacheStats, setCacheStats] = useState<PdfCacheStats | null>(null);
   const [cacheBusy, setCacheBusy] = useState(false);
   const [cacheError, setCacheError] = useState<string | null>(null);
-
-  const logEntries = useSyncExternalStore(
-    logger.subscribe,
-    logger.getEntries,
-    logger.getEntries
-  );
-  const logEntryCount = logEntries.length;
+  const displayCacheDir = getDisplayCacheDir(cacheConfig);
 
   const refreshPdfCacheInfo = useCallback(async () => {
     setCacheBusy(true);
@@ -253,7 +191,7 @@ export function AppSettingsPanel({ open, onClose }: AppSettingsPanelProps) {
 
   useEffect(() => {
     if (!open) {
-      setLogDialogOpen(false);
+      setAdvancedOpen(false);
       setCacheError(null);
       return;
     }
@@ -261,24 +199,14 @@ export function AppSettingsPanel({ open, onClose }: AppSettingsPanelProps) {
   }, [open, refreshPdfCacheInfo]);
 
   useEffect(() => {
-    if (!debugMode) {
-      setLogDialogOpen(false);
-    }
-  }, [debugMode]);
-
-  useEffect(() => {
     if (!open) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      if (logDialogOpen) {
-        setLogDialogOpen(false);
-        return;
-      }
       onClose();
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [open, logDialogOpen, onClose]);
+  }, [open, onClose]);
 
   if (!open) return null;
 
@@ -306,63 +234,6 @@ export function AppSettingsPanel({ open, onClose }: AppSettingsPanelProps) {
         </div>
 
         <div className="flex-1 space-y-6 overflow-y-auto px-4 py-4">
-          <div className="space-y-4">
-            <span className="text-xs font-medium text-foreground">
-              阅读默认值
-            </span>
-
-            <div className="space-y-2">
-              <span className="text-xs text-muted-foreground">字体</span>
-              <div className="grid grid-cols-2 gap-1.5">
-                {FONT_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    onClick={() => setFontFamily(opt.value)}
-                    className={cn(
-                      "rounded-lg px-3 py-2 text-xs font-medium transition-all",
-                      fontFamily === opt.value
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted text-muted-foreground hover:text-foreground"
-                    )}
-                    style={{ fontFamily: `${opt.value}, system-ui` }}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <RangeSlider
-              label="字号"
-              value={fontSize}
-              min={14}
-              max={32}
-              step={2}
-              displayValue={`${fontSize}px`}
-              onChange={setFontSize}
-            />
-
-            <RangeSlider
-              label="行高"
-              value={lineHeight}
-              min={1.4}
-              max={2.4}
-              step={0.2}
-              displayValue={lineHeight.toFixed(1)}
-              onChange={setLineHeight}
-            />
-
-            <RangeSlider
-              label="边距"
-              value={margin}
-              min={40}
-              max={120}
-              step={20}
-              displayValue={`${margin}px`}
-              onChange={setMargin}
-            />
-          </div>
-
           <div className="space-y-2">
             <span className="text-xs font-medium text-foreground">
               删除设置
@@ -405,121 +276,101 @@ export function AppSettingsPanel({ open, onClose }: AppSettingsPanelProps) {
           </div>
 
           <div className="space-y-2">
-            <span className="text-xs font-medium text-foreground">高级</span>
+            <button
+              type="button"
+              onClick={() => setAdvancedOpen((value) => !value)}
+              className="flex w-full items-center justify-between rounded-lg border border-border/60 bg-background/60 px-3 py-2 text-left transition-colors hover:bg-accent/60"
+              aria-expanded={advancedOpen}
+            >
+              <span className="text-xs font-medium text-foreground">高级设置</span>
+              <ChevronRight
+                className={cn(
+                  "h-4 w-4 text-muted-foreground transition-transform",
+                  advancedOpen && "rotate-90"
+                )}
+              />
+            </button>
 
-            <div className="space-y-2 rounded-lg border border-border/60 bg-background/80 p-3">
-              <div className="flex items-start justify-between gap-2">
+            {advancedOpen && (
+              <div className="space-y-2 rounded-lg border border-border/60 bg-background/80 p-3">
+                <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0 space-y-1">
                   <p className="text-xs font-medium text-foreground">
-                    PDF 缓存目录
+                    缓存目录
                   </p>
                   <p className="text-[11px] text-muted-foreground">
                     {cacheConfig?.using_default
                       ? "当前使用系统默认缓存目录"
-                      : "当前使用自定义缓存基目录"}
+                      : "当前使用自定义缓存目录"}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => void refreshPdfCacheInfo()}
-                  disabled={cacheBusy}
-                  className="inline-flex items-center gap-1 rounded-md border border-border/60 px-2 py-1 text-[11px] text-foreground/80 transition-colors hover:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <RefreshCcw
-                    className={cn("h-3 w-3", cacheBusy && "animate-spin")}
-                  />
-                  刷新
-                </button>
-              </div>
+                  <button
+                    type="button"
+                    onClick={() => void refreshPdfCacheInfo()}
+                    disabled={cacheBusy}
+                    className="inline-flex items-center gap-1 rounded-md border border-border/60 px-2 py-1 text-[11px] text-foreground/80 transition-colors hover:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <RefreshCcw
+                      className={cn("h-3 w-3", cacheBusy && "animate-spin")}
+                    />
+                    刷新
+                  </button>
+                </div>
 
-              <div className="rounded-md border border-border/50 bg-muted/20 px-2.5 py-2">
-                <p className="break-all text-[11px] text-foreground/80">
-                  {cacheConfig?.effective_dir ?? "正在读取缓存目录..."}
-                </p>
-                {pdfCacheBaseDir && (
-                  <p className="mt-1 break-all text-[11px] text-muted-foreground">
-                    基目录：{pdfCacheBaseDir}
+                <div className="rounded-md border border-border/50 bg-muted/20 px-2.5 py-2">
+                  <p className="break-all text-[11px] text-foreground/80">
+                    {displayCacheDir}
                   </p>
+                </div>
+
+                <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                  <span>缓存大小</span>
+                  <span>
+                    {cacheStats
+                      ? `${formatBytes(cacheStats.total_bytes)} · ${cacheStats.file_count} 个文件`
+                      : "正在读取..."}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => void handleSelectPdfCacheDir()}
+                    disabled={cacheBusy}
+                    className="inline-flex items-center justify-center gap-1 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs font-medium text-foreground/80 transition-colors hover:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <FolderOpen className="h-3.5 w-3.5" />
+                    更改目录
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleUseDefaultPdfCacheDir()}
+                    disabled={cacheBusy}
+                    className="rounded-lg border border-border/60 bg-background px-3 py-2 text-xs font-medium text-foreground/80 transition-colors hover:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    使用默认
+                  </button>
+                </div>
+
+                {cacheError && (
+                  <p className="text-[11px] text-destructive">{cacheError}</p>
                 )}
-              </div>
 
-              <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                <span>缓存大小</span>
-                <span>
-                  {cacheStats
-                    ? `${formatBytes(cacheStats.total_bytes)} · ${cacheStats.file_count} 个文件`
-                    : "正在读取..."}
-                </span>
-              </div>
-
-              <div className="grid grid-cols-2 gap-1.5">
                 <button
                   type="button"
-                  onClick={() => void handleSelectPdfCacheDir()}
+                  onClick={() => void handleClearPdfCache()}
                   disabled={cacheBusy}
-                  className="inline-flex items-center justify-center gap-1 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs font-medium text-foreground/80 transition-colors hover:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex w-full items-center justify-center gap-1 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs font-medium text-foreground/80 transition-colors hover:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  <FolderOpen className="h-3.5 w-3.5" />
-                  选择目录
+                  <Trash2 className="h-3.5 w-3.5" />
+                  清除缓存
                 </button>
-                <button
-                  type="button"
-                  onClick={() => void handleUseDefaultPdfCacheDir()}
-                  disabled={cacheBusy}
-                  className="rounded-lg border border-border/60 bg-background px-3 py-2 text-xs font-medium text-foreground/80 transition-colors hover:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  使用默认
-                </button>
+
               </div>
-
-              {cacheError && (
-                <p className="text-[11px] text-destructive">{cacheError}</p>
-              )}
-
-              <button
-                type="button"
-                onClick={() => void handleClearPdfCache()}
-                disabled={cacheBusy}
-                className="inline-flex w-full items-center justify-center gap-1 rounded-lg border border-border/60 bg-background px-3 py-2 text-xs font-medium text-foreground/80 transition-colors hover:bg-accent/60 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                清除缓存
-              </button>
-            </div>
-
-            <div className="space-y-1">
-              <label className="flex cursor-pointer items-center gap-2 text-xs text-foreground/80">
-                <input
-                  type="checkbox"
-                  checked={debugMode}
-                  onChange={(e) => setDebugMode(e.target.checked)}
-                  className="h-3.5 w-3.5 rounded border-border"
-                />
-                调试模式
-              </label>
-              <p className="text-[11px] text-muted-foreground">
-                开启后会记录内存日志，便于排查问题。
-              </p>
-            </div>
-
-            {debugMode && (
-              <button
-                type="button"
-                onClick={() => setLogDialogOpen(true)}
-                className="inline-flex w-full items-center justify-center rounded-lg border border-border/60 bg-background px-3 py-2 text-xs font-medium text-foreground/80 transition-colors hover:bg-accent/60"
-              >
-                查看日志 ({logEntryCount})
-              </button>
             )}
           </div>
         </div>
       </div>
-
-      <DebugLogDialog
-        open={logDialogOpen}
-        onClose={() => setLogDialogOpen(false)}
-      />
     </>
   );
 }
-

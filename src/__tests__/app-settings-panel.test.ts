@@ -10,14 +10,10 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: vi.fn(),
 }));
 
-vi.mock("@/components/library/DebugLogDialog", () => ({
-  DebugLogDialog: () => null,
-}));
-
 import { AppSettingsPanel } from "@/components/library/AppSettingsPanel";
 
 describe("AppSettingsPanel", () => {
-  it("打开时渲染 PDF 缓存设置区块", () => {
+  it("打开时默认折叠高级设置", () => {
     const html = renderToStaticMarkup(
       React.createElement(AppSettingsPanel, {
         open: true,
@@ -25,8 +21,9 @@ describe("AppSettingsPanel", () => {
       })
     );
 
-    expect(html).toContain("PDF 缓存目录");
-    expect(html).toContain("清除缓存");
-    expect(html).toContain("使用默认");
+    expect(html).toContain("高级设置");
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).not.toContain("缓存目录");
+    expect(html).not.toContain("调试模式");
   });
 });
